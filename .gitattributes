@@ -1,0 +1,7 @@
+* text=auto eol=lf
+* whitespace=blank-at-eol,-blank-at-eof,space-before-tab
+*.md whitespace=-blank-at-eol,-blank-at-eof,space-before-tab
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.xlsx binary
+*.pdf binary

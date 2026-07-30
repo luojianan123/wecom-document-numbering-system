@@ -1,0 +1,77 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:18-alpine
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: filecode
+      POSTGRES_USER: filecode
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-filecode-local}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U filecode -d filecode"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: ./backend
+    logging: *default-logging
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://filecode:${POSTGRES_PASSWORD:-filecode-local}@db:5432/filecode
+      SESSION_SECRET: ${SESSION_SECRET:-local-compose-session-secret-change-before-production}
+      SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS:-28800}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8088}
+      BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL:-http://localhost:8088}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8088}
+      WECOM_AUTH_MODE: ${WECOM_AUTH_MODE:-mock}
+      WECOM_CORP_ID: ${WECOM_CORP_ID:-}
+      WECOM_AGENT_ID: ${WECOM_AGENT_ID:-}
+      WECOM_CORP_SECRET: ${WECOM_CORP_SECRET:-}
+      WECOM_ADMIN_USER_IDS: ${WECOM_ADMIN_USER_IDS:-}
+      AI_MODE: ${AI_MODE:-rules}
+      AI_API_BASE_URL: ${AI_API_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      RULE_FILE_PATH: /app/rules/编号规则采集模板.yaml
+      ABBREVIATION_FILE_PATH: /app/rules/文件简号.xlsx
+      AUTO_CREATE_TABLES: "false"
+    volumes:
+      - ./编号规则采集模板.yaml:/app/rules/编号规则采集模板.yaml:ro
+      - ./文件简号.xlsx:/app/rules/文件简号.xlsx:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: ./frontend
+    logging: *default-logging
+    ports:
+      - "${WEB_PORT:-8088}:80"
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

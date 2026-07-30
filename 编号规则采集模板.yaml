@@ -1,0 +1,86 @@
+rule:
+  name: "文件编号 A-H 规则"
+  version: "V1.1"
+
+input:
+  required:
+    - "文件名称"
+  note: "文件名称不带项目号；部组件级别不由用户输入。"
+
+segments:
+  A:
+    name: "固定值"
+    value: "GH"
+
+  B:
+    name: "项目号"
+    source: "当前项目的4位项目号"
+
+  C:
+    name: "部组件级别"
+    source: "系统自动判断"
+    rules:
+      - "PCBA类文件=5"
+      - "仅提到板卡且未明确PCBA或PCB时=5"
+      - "软件类文件=5"
+      - "逻辑类文件=5"
+      - "操作系统类文件=5"
+      - "PCB类文件=7"
+      - "两个及以上计算机或设备组成的系统=2"
+      - "一台计算机或设备组成的产品=3"
+    order:
+      - "文件简号规则中的软件类"
+      - "PCBA"
+      - "PCB"
+      - "名称中的软件类、逻辑类、操作系统类"
+      - "未明确类型的板卡"
+      - "两个及以上设备组成的系统"
+      - "单台设备"
+    unclear: "配置管理员确认"
+
+  D:
+    name: "功能"
+    format: "两位大写字母"
+    rule: "优先表示产品功能；不清晰时从文件名称提取关键词形成两位代码"
+
+  E:
+    name: "固定值"
+    value: "010"
+
+  F:
+    name: "文件简号"
+    source: "./文件简号.xlsx"
+    match:
+      - "完整文件名称"
+      - "最长、最具体的文件类型名称"
+    unclear: "配置管理员确认"
+
+  G:
+    name: "阶段号"
+    rules:
+      - "正样件=Z"
+      - "鉴定件=C"
+      - "其他=空"
+
+  H:
+    name: "版本号"
+    rules:
+      - "正样件=2.00"
+      - "其他=1.00"
+
+format:
+  software_prefix: "R-"
+  software_condition: "文件简号.xlsx中“以下为软件：”标记行之后"
+  review_prefix: "P-"
+  review_condition: "文件类型为评审结论报告"
+  combined_prefix: "P-R-"
+  with_stage: "{A}{B}-{C}{D}-{E}{F}-{G}-{H}"
+  without_stage: "{A}{B}-{C}{D}-{E}{F}-{H}"
+
+terminology:
+  - "逻辑单元集成测试=仿真测试"
+  - "逻辑配置项测试=确认测试"
+
+examples:
+  with_stage: "GH1234-3KZ-010JY-Z-2.00"
+  without_stage: "GH1234-3KZ-010JY-1.00"
