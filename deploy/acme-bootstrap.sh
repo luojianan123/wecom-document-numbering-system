@@ -20,6 +20,7 @@ acme_ca="${ACME_CA:-letsencrypt}"
 mkdir -p /certs
 
 acme.sh --set-default-ca --server "$acme_ca"
+set +e
 acme.sh \
     --issue \
     --server "$acme_ca" \
@@ -28,6 +29,13 @@ acme.sh \
     --keylength ec-256 \
     --log /acme.sh/acme.sh.log \
     --log-level 1
+issue_status=$?
+set -e
+
+# acme.sh returns 2 when an existing certificate is not due for renewal.
+if [ "$issue_status" -ne 0 ] && [ "$issue_status" -ne 2 ]; then
+    exit "$issue_status"
+fi
 
 acme.sh \
     --install-cert \
