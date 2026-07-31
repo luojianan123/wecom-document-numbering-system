@@ -105,9 +105,10 @@ def test_complete_stage_one_business_flow(client: TestClient) -> None:
         headers={"X-CSRF-Token": user_csrf},
     )
     assert generated.status_code == 200, generated.text
-    assert generated.json()["final_code"] == "GH1234-3TX-010SS-1.00"
-    assert generated.json()["standard_name"] == "通信模块使用说明书"
-    assert generated.json()["enabled"] is True
+    assert generated.json()["status"] == "generated"
+    assert generated.json()["file_code"]["final_code"] == "GH1234-3TX-010SS-1.00"
+    assert generated.json()["file_code"]["standard_name"] == "通信模块使用说明书"
+    assert generated.json()["file_code"]["enabled"] is True
 
 
 def test_user_can_generate_requested_name_after_partial_match(
@@ -156,9 +157,352 @@ def test_user_can_generate_requested_name_after_partial_match(
         headers={"X-CSRF-Token": user_csrf},
     )
     assert generated.status_code == 200, generated.text
-    assert generated.json()["standard_name"] == "主控板原理图"
-    assert generated.json()["segment_c"] == "5"
-    assert generated.json()["id"] != partial.json()[0]["id"]
+    assert generated.json()["status"] == "pending_review"
+    assert generated.json()["review"]["proposed_standard_name"] == "主控板原理图"
+    assert generated.json()["review"]["similar_names"][0]["standard_name"] == (
+        "机载任务智能处理机S5000C主控板原理图"
+    )
+
+
+def test_unrelated_project_name_is_submitted_for_admin_review(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={
+            "project_name": "机上实时任务管控与应急响应分系统",
+            "project_code": "1238",
+        },
+        files={
+            "file": (
+                "files.csv",
+                (
+                    "文件名称\n"
+                    "机载任务智能处理机主控板原理图\n"
+                    "机上实时任务管控软件测试报告\n"
+                ).encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    project_id = initialized.json()["project"]["id"]
+    client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).raise_for_status()
+
+    user_csrf = login(client, "user")
+    file_name = "我昨晚吃了好吃的水果开发计划"
+    search = client.get(
+        "/api/codes/search",
+        params={"project_id": project_id, "name": file_name},
+    )
+    assert search.status_code == 200
+    assert search.json() == []
+
+    submitted = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": file_name},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == "pending_review"
+    assert "疑似非工程内容" in submitted.json()["message"]
+    assert "明显生活化" in submitted.json()["review"]["issue_summary"]
+    assert submitted.json()["file_code"] is None
+
+
+@pytest.mark.parametrize(
+    "file_name",
+    [
+        "李京平是猪",
+        "李京平原理图",
+    ],
+)
+def test_personal_judgement_or_person_name_document_requires_review(
+    client: TestClient,
+    file_name: str,
+) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={
+            "project_name": "压缩存储单元千兆网",
+            "project_code": "1240",
+        },
+        files={
+            "file": (
+                "files.csv",
+                "文件名称\n压缩存储单元千兆网正样件方案设计报告\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    project_id = initialized.json()["project"]["id"]
+    client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).raise_for_status()
+
+    user_csrf = login(client, "user")
+    submitted = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": file_name},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == "pending_review"
+    assert submitted.json()["file_code"] is None
+    assert "疑似非工程内容" in submitted.json()["message"]
+
+
+def test_new_component_name_can_be_numbered_without_matching_project_name(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={
+            "project_name": "压缩存储单元千兆网",
+            "project_code": "1239",
+        },
+        files={
+            "file": (
+                "files.csv",
+                "文件名称\n压缩存储单元千兆网正样件方案设计报告\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    project_id = initialized.json()["project"]["id"]
+    client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).raise_for_status()
+
+    user_csrf = login(client, "user")
+    generated = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "主控板原理图"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert generated.status_code == 200, generated.text
+    assert generated.json()["status"] == "generated"
+    assert generated.json()["file_code"]["standard_name"] == "主控板原理图"
+    assert generated.json()["file_code"]["final_code"].startswith("GH1239-5ZK-")
+
+
+@pytest.mark.parametrize(
+    "file_name,message",
+    [
+        ("123456", "纯数字"),
+        ("哈哈哈哈", "重复字符"),
+        ("https://example.com", "网址"),
+        ("控制模块😀技术要求", "表情"),
+        ("控制模块@技术要求", "特殊符号"),
+        ("asdf", "明显无关"),
+    ],
+)
+def test_user_file_name_validation_rejects_invalid_content(
+    client: TestClient,
+    file_name: str,
+    message: str,
+) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={"project_name": "名称校验项目", "project_code": "1236"},
+        files={
+            "file": (
+                "files.csv",
+                "文件名称\n控制模块技术要求\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    project_id = initialized.json()["project"]["id"]
+    client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).raise_for_status()
+
+    user_csrf = login(client, "user")
+    response = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": file_name},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert response.status_code == 400
+    assert message in response.json()["detail"]
+
+
+def test_admin_approves_similar_name_review_then_user_receives_code(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={"project_name": "名称审核项目", "project_code": "1237"},
+        files={
+            "file": (
+                "files.csv",
+                "文件名称\n机载任务智能处理机S5000C主控板原理图\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    project_id = initialized.json()["project"]["id"]
+    client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).raise_for_status()
+
+    user_csrf = login(client, "user")
+    submitted = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "主控板原理图"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert submitted.status_code == 200
+    review_id = submitted.json()["review"]["id"]
+
+    admin_csrf = login(client, "admin")
+    reviews = client.get("/api/admin/name-reviews")
+    assert reviews.status_code == 200
+    assert [item["id"] for item in reviews.json()] == [review_id]
+
+    approved = client.post(
+        f"/api/admin/name-reviews/{review_id}/approve",
+        json={"file_name": "备用主控板原理图"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["reviewed_name"] == "备用主控板原理图"
+    assert approved.json()["file_code"]["final_code"].startswith("GH1237-")
+
+    user_csrf = login(client, "user")
+    mine = client.get("/api/name-reviews/mine")
+    assert mine.status_code == 200
+    assert mine.json()[0]["status"] == "approved"
+    assert mine.json()[0]["file_code"]["standard_name"] == "备用主控板原理图"
+
+    admin_csrf = login(client, "admin")
+    deleted = client.delete(
+        (
+            f"/api/admin/projects/{project_id}/codes/"
+            f"{approved.json()['file_code_id']}"
+        ),
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert deleted.status_code == 204
+
+    user_csrf = login(client, "user")
+    after_delete = client.get("/api/name-reviews/mine")
+    assert after_delete.status_code == 200
+    assert after_delete.json()[0]["status"] == "rejected"
+    assert after_delete.json()[0]["file_code"] is None
+
+
+def test_special_numbering_project_requires_admin_manual_review(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={
+            "project_name": "特殊编号项目",
+            "project_code": "1241",
+            "special_numbering": "true",
+        },
+        files={
+            "file": (
+                "files.csv",
+                "文件名称\n控制模块技术要求\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert initialized.status_code == 200, initialized.text
+    project = initialized.json()["project"]
+    assert project["special_numbering"] is True
+    project_id = project["id"]
+
+    client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).raise_for_status()
+
+    admin_generated = client.post(
+        f"/api/admin/projects/{project_id}/codes",
+        json={"file_name": "通信模块使用说明书"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert admin_generated.status_code == 200, admin_generated.text
+    assert admin_generated.json()["success"] is True
+
+    user_csrf = login(client, "user")
+    existing = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "控制模块技术要求"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert existing.status_code == 200
+    assert existing.json()["status"] == "existing"
+
+    requested = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "显示模块使用说明书"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert requested.status_code == 200, requested.text
+    assert requested.json()["status"] == "pending_review"
+    assert "等待管理员人工编号" in requested.json()["message"]
+    review_id = requested.json()["review"]["id"]
+    assert requested.json()["review"]["project"]["special_numbering"] is True
+
+    admin_csrf = login(client, "admin")
+    missing_code = client.post(
+        f"/api/admin/name-reviews/{review_id}/approve",
+        json={"file_name": "显示模块使用说明书"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert missing_code.status_code == 400
+    assert "填写完整编号" in missing_code.json()["detail"]
+
+    approved = client.post(
+        f"/api/admin/name-reviews/{review_id}/approve",
+        json={
+            "file_name": "显示模块使用说明书",
+            "final_code": "SP-1241-DISPLAY-001",
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["file_code"]["final_code"] == "SP-1241-DISPLAY-001"
+    assert approved.json()["file_code"]["source"] == "user_review_manual"
+
+    user_csrf = login(client, "user")
+    mine = client.get("/api/name-reviews/mine")
+    result = next(item for item in mine.json() if item["id"] == review_id)
+    assert result["file_code"]["final_code"] == "SP-1241-DISPLAY-001"
+
+    admin_csrf = login(client, "admin")
+    toggled = client.post(
+        f"/api/admin/projects/{project_id}/special-numbering",
+        json={"special_numbering": False},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert toggled.status_code == 200
+    assert toggled.json()["special_numbering"] is False
 
 
 def test_software_batch_uses_level_five_and_r_prefix(

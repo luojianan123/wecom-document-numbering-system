@@ -13,6 +13,9 @@ if (-not (Test-Path $Python)) {
 Write-Host "Installing or updating backend dependencies..."
 & $Python -m pip install --disable-pip-version-check -e "$BackendRoot[dev]"
 
-Write-Host "Starting the file code system at http://localhost:8088"
+Write-Host "Applying database migrations..."
 Set-Location $ProjectRoot
+& $Python -m alembic -c "$BackendRoot\alembic.ini" upgrade head
+
+Write-Host "Starting the file code system at http://localhost:8088"
 & $Python -m uvicorn app.main:app --app-dir $BackendRoot --host 0.0.0.0 --port 8088

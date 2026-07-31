@@ -36,6 +36,10 @@ class User(Base):
 
     projects: Mapped[list["Project"]] = relationship(back_populates="creator")
     claims: Mapped[list["CodeClaim"]] = relationship(back_populates="user")
+    name_review_requests: Mapped[list["NameReviewRequest"]] = relationship(
+        back_populates="requester",
+        foreign_keys="NameReviewRequest.requested_by_id",
+    )
 
 
 class Project(Base):
@@ -45,6 +49,7 @@ class Project(Base):
     project_code: Mapped[str] = mapped_column(String(4), unique=True, index=True)
     project_name: Mapped[str] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(16), default="draft")
+    special_numbering: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -54,6 +59,10 @@ class Project(Base):
         cascade="all, delete-orphan",
     )
     batch_items: Mapped[list["ProjectBatchItem"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+    name_review_requests: Mapped[list["NameReviewRequest"]] = relationship(
         back_populates="project",
         cascade="all, delete-orphan",
     )
@@ -147,6 +156,47 @@ class CodeReservation(Base):
         DateTime(timezone=True),
         default=utcnow,
     )
+
+
+class NameReviewRequest(Base):
+    __tablename__ = "name_review_requests"
+    __table_args__ = (
+        Index("ix_name_reviews_project_status", "project_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    requested_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    original_name: Mapped[str] = mapped_column(Text)
+    proposed_standard_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issue_summary: Mapped[str] = mapped_column(Text)
+    similar_names: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON,
+        default=list,
+    )
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    reviewed_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("file_codes.id"),
+        nullable=True,
+    )
+    reviewed_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    project: Mapped[Project] = relationship(back_populates="name_review_requests")
+    requester: Mapped[User] = relationship(
+        back_populates="name_review_requests",
+        foreign_keys=[requested_by_id],
+    )
+    reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_id])
+    file_code: Mapped[FileCode | None] = relationship()
 
 
 class AuthState(Base):

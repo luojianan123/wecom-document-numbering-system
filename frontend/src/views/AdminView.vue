@@ -5,6 +5,7 @@ import {
   addAdminManualProjectCode,
   addAdminProjectCode,
   ApiError,
+  approveAdminNameReview,
   batchDeleteAdminProjectFiles,
   confirmProject,
   deleteAdminBatchItem,
@@ -14,15 +15,24 @@ import {
   getAdminProject,
   importProjectCodes,
   initializeProject,
+  listAdminNameReviews,
   listProjects,
   manuallyNumberProjectBatchItem,
-  retryProjectCode
+  rejectAdminNameReview,
+  retryProjectCode,
+  setProjectSpecialNumbering
 } from "../api";
 import AppHeader from "../components/AppHeader.vue";
-import type { BatchItem, Project, ProjectInitResult } from "../types";
+import type {
+  BatchItem,
+  NameReview,
+  Project,
+  ProjectInitResult
+} from "../types";
 
 const projectName = ref("");
 const projectCode = ref("");
+const projectSpecialNumbering = ref(false);
 const selectedFile = ref<File | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const result = ref<ProjectInitResult | null>(null);
@@ -48,6 +58,12 @@ const deletingBatchItemId = ref<number | null>(null);
 const selectedItemKeys = ref<string[]>([]);
 const deletingSelected = ref(false);
 const exportingCodes = ref(false);
+const nameReviews = ref<NameReview[]>([]);
+const reviewNames = ref<Record<number, string>>({});
+const reviewCodes = ref<Record<number, string>>({});
+const loadingReviews = ref(false);
+const processingReviewId = ref<number | null>(null);
+const updatingSpecialNumbering = ref(false);
 
 const filteredProjects = computed(() => {
   const query = projectNumberQuery.value.trim();
@@ -102,13 +118,74 @@ const canExport = computed(
     result.value.failure_count === 0
 );
 
-onMounted(loadProjects);
+onMounted(async () => {
+  await Promise.all([loadProjects(), loadNameReviews()]);
+});
 
 async function loadProjects(): Promise<void> {
   try {
     projects.value = await listProjects(true);
   } catch (error) {
     showError(error);
+  }
+}
+
+async function loadNameReviews(): Promise<void> {
+  loadingReviews.value = true;
+  try {
+    nameReviews.value = await listAdminNameReviews();
+    reviewNames.value = Object.fromEntries(
+      nameReviews.value.map((review) => [
+        review.id,
+        review.proposed_standard_name ?? review.original_name
+      ])
+    );
+    reviewCodes.value = Object.fromEntries(
+      nameReviews.value.map((review) => [
+        review.id,
+        review.file_code?.final_code ?? ""
+      ])
+    );
+  } catch (error) {
+    showError(error);
+  } finally {
+    loadingReviews.value = false;
+  }
+}
+
+async function approveReview(review: NameReview): Promise<void> {
+  const fileName = reviewNames.value[review.id]?.trim();
+  if (!fileName) {
+    showToast("请输入审核后的正确文件名称");
+    return;
+  }
+  const finalCode = reviewCodes.value[review.id]?.trim();
+  if (review.project.special_numbering && !finalCode) {
+    showToast("特殊编号项目必须填写完整编号");
+    return;
+  }
+  processingReviewId.value = review.id;
+  try {
+    await approveAdminNameReview(review.id, fileName, finalCode);
+    await loadNameReviews();
+    showToast("审核通过，正确文件名称已生成编号并提交给用户");
+  } catch (error) {
+    showError(error);
+  } finally {
+    processingReviewId.value = null;
+  }
+}
+
+async function rejectReview(review: NameReview): Promise<void> {
+  processingReviewId.value = review.id;
+  try {
+    await rejectAdminNameReview(review.id, "文件名称不符合项目文件命名要求");
+    await loadNameReviews();
+    showToast("已驳回该名称申请");
+  } catch (error) {
+    showError(error);
+  } finally {
+    processingReviewId.value = null;
   }
 }
 
@@ -186,9 +263,11 @@ async function initialize(): Promise<void> {
     const initialized = await initializeProject(
       projectName.value.trim(),
       projectCode.value,
+      projectSpecialNumbering.value,
       selectedFile.value
     );
     showResult(initialized);
+    projectSpecialNumbering.value = false;
     await loadProjects();
     showToast("批量生成完成");
   } catch (error) {
@@ -196,6 +275,45 @@ async function initialize(): Promise<void> {
   } finally {
     loading.value = false;
   }
+}
+
+async function updateSpecialNumbering(value: boolean): Promise<void> {
+  if (!result.value) return;
+  updatingSpecialNumbering.value = true;
+  try {
+    const project = await setProjectSpecialNumbering(
+      result.value.project.id,
+      value
+    );
+    result.value.project = project;
+    projects.value = projects.value.map((item) =>
+      item.id === project.id ? project : item
+    );
+    showToast(value ? "已标记为特殊编号项目" : "已取消特殊编号标识");
+  } catch (error) {
+    showError(error);
+  } finally {
+    updatingSpecialNumbering.value = false;
+  }
+}
+
+async function toggleSpecialNumbering(): Promise<void> {
+  if (!result.value) return;
+  const nextValue = !result.value.project.special_numbering;
+  try {
+    await showConfirmDialog({
+      title: nextValue
+        ? "标记为特殊编号项目"
+        : "取消特殊编号项目",
+      message: nextValue
+        ? "标记后，用户申请新编号将转交管理员人工编号；管理员直接新增文件仍按正常规则生成编号。"
+        : "取消后，用户申请新编号将恢复自动执行编号规则。",
+      confirmButtonText: nextValue ? "确认标记" : "确认取消"
+    });
+  } catch {
+    return;
+  }
+  await updateSpecialNumbering(nextValue);
 }
 
 async function openProject(project: Project): Promise<void> {
@@ -581,6 +699,92 @@ async function confirm(): Promise<void> {
         <div class="hero-rule">XLSX / CSV</div>
       </section>
 
+      <section class="panel name-review-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">用户名称申请</p>
+            <h2>待审核名称</h2>
+          </div>
+          <van-button
+            plain
+            size="small"
+            color="#17324d"
+            :loading="loadingReviews"
+            @click="loadNameReviews"
+          >
+            刷新
+          </van-button>
+        </div>
+        <div v-if="nameReviews.length" class="name-review-list">
+          <article
+            v-for="review in nameReviews"
+            :key="review.id"
+            :class="[
+              'name-review-item',
+              { 'special-review-item': review.project.special_numbering }
+            ]"
+          >
+            <div class="name-review-copy">
+              <strong>
+                {{ review.project.project_code }} · {{ review.original_name }}
+              </strong>
+              <van-tag
+                v-if="review.project.special_numbering"
+                color="#fff1e8"
+                text-color="#a14922"
+              >
+                特殊编号
+              </van-tag>
+              <span>{{ review.issue_summary }}</span>
+              <small v-if="review.similar_names.length">
+                相似名称：{{ review.similar_names.map((item) => item.standard_name).join("、") }}
+              </small>
+            </div>
+            <van-field
+              v-model="reviewNames[review.id]"
+              label="正确名称"
+              placeholder="管理员修改后的正确文件名称"
+              maxlength="512"
+              clearable
+            />
+            <van-field
+              v-if="review.project.special_numbering"
+              v-model="reviewCodes[review.id]"
+              label="完整编号"
+              placeholder="管理员填写完整编号"
+              maxlength="64"
+              clearable
+            />
+            <div class="name-review-actions">
+              <van-button
+                plain
+                type="danger"
+                :loading="processingReviewId === review.id"
+                @click="rejectReview(review)"
+              >
+                驳回
+              </van-button>
+              <van-button
+                color="#176443"
+                :loading="processingReviewId === review.id"
+                @click="approveReview(review)"
+              >
+                {{
+                  review.project.special_numbering
+                    ? "人工编号并提交"
+                    : "通过并生成编号"
+                }}
+              </van-button>
+            </div>
+          </article>
+        </div>
+        <van-empty
+          v-else
+          image="search"
+          description="暂无待审核文件名称"
+        />
+      </section>
+
       <div class="admin-grid">
         <section class="panel init-form">
           <div class="section-heading">
@@ -604,6 +808,25 @@ async function confirm(): Promise<void> {
               inputmode="numeric"
             />
           </van-cell-group>
+
+          <label
+            :class="[
+              'special-numbering-choice',
+              { selected: projectSpecialNumbering }
+            ]"
+          >
+            <van-checkbox
+              v-model="projectSpecialNumbering"
+              shape="square"
+              checked-color="#b4532a"
+            />
+            <span>
+              <strong>标记为特殊编号项目</strong>
+              <small>
+                用户申请新编号时转管理员人工编号，管理员初始化仍按正常规则运行。
+              </small>
+            </span>
+          </label>
 
           <div class="upload-box" role="button" tabindex="0" @click="chooseFile">
             <input
@@ -658,7 +881,16 @@ async function confirm(): Promise<void> {
                 @click="openProject(project)"
               >
                 <div>
-                  <strong>{{ project.project_code }}</strong>
+                  <strong>
+                    {{ project.project_code }}
+                    <van-tag
+                      v-if="project.special_numbering"
+                      color="#fff1e8"
+                      text-color="#a14922"
+                    >
+                      特殊
+                    </van-tag>
+                  </strong>
                   <span>{{ project.project_name }}</span>
                 </div>
                 <div class="project-row-action">
@@ -715,6 +947,13 @@ async function confirm(): Promise<void> {
           </div>
           <div class="project-heading-actions">
             <div class="summary-tags">
+              <van-tag
+                v-if="result.project.special_numbering"
+                color="#fff1e8"
+                text-color="#a14922"
+              >
+                特殊编号项目
+              </van-tag>
               <van-tag color="#e8f3ee" text-color="#176443">
                 已入库 {{ storedCount }}
               </van-tag>
@@ -740,6 +979,21 @@ async function confirm(): Promise<void> {
                 失败 {{ result.failure_count - duplicateCount }}
               </van-tag>
             </div>
+            <van-button
+              :plain="!result.project.special_numbering"
+              :color="
+                result.project.special_numbering ? '#b4532a' : '#7b4a2f'
+              "
+              size="small"
+              :loading="updatingSpecialNumbering"
+              @click="toggleSpecialNumbering"
+            >
+              {{
+                result.project.special_numbering
+                  ? "取消特殊编号项目"
+                  : "标记为特殊编号项目"
+              }}
+            </van-button>
             <van-button
               plain
               color="#176443"
@@ -792,7 +1046,7 @@ async function confirm(): Promise<void> {
               loading-text="AI 处理中…"
               @click="addCode"
             >
-              AI 修正并生成编码
+              按规则生成编码
             </van-button>
             <input
               ref="importFileInput"

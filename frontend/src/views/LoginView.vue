@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { showToast } from "vant";
+import ucasLogo from "../assets/ucas-logo-white.png";
 import { loginForDevelopment } from "../auth";
 import { ApiError, startQrLogin } from "../api";
 import type { Role } from "../types";
@@ -64,11 +65,12 @@ async function mockLogin(role: Role): Promise<void> {
 <template>
   <main class="login-page">
     <section class="login-brand">
-      <div class="brand-mark">GH</div>
-      <p class="eyebrow">企业文件编号系统</p>
-      <h1>让每个文件，<br />从创建起就有正确编号。</h1>
-      <p class="brand-intro">
-        项目初始化、编码领取与缺失补码统一在一个入口完成，编号严格遵循 A～H 规则。
+      <div class="brand-mark">
+        <img :src="ucasLogo" alt="国科环宇 UCAS" />
+      </div>
+      <h1 class="brand-title">项目文件编号系统</h1>
+      <p class="brand-statement">
+        让每个文件，<br />从创建起就有正确编号
       </p>
       <div class="format-sample">
         <span>编号示例</span>

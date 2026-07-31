@@ -38,6 +38,7 @@ class ProjectOut(BaseModel):
     project_code: str
     project_name: str
     status: str
+    special_numbering: bool
     created_at: datetime
 
 
@@ -81,6 +82,45 @@ class ProjectInitOut(BaseModel):
 class GenerateCodeIn(BaseModel):
     project_id: int
     file_name: str = Field(min_length=1, max_length=512)
+
+
+class NameReviewOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    project: ProjectOut
+    requested_by_id: int
+    original_name: str
+    proposed_standard_name: str | None
+    issue_summary: str
+    similar_names: list[dict[str, object]]
+    status: Literal["pending", "approved", "rejected"]
+    reviewed_name: str | None
+    file_code_id: int | None
+    file_code: FileCodeOut | None
+    created_at: datetime
+    reviewed_at: datetime | None
+
+
+class GenerateCodeOut(BaseModel):
+    status: Literal["generated", "existing", "pending_review"]
+    message: str
+    file_code: FileCodeOut | None = None
+    review: NameReviewOut | None = None
+
+
+class ApproveNameReviewIn(BaseModel):
+    file_name: str = Field(min_length=1, max_length=512)
+    final_code: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class SpecialNumberingIn(BaseModel):
+    special_numbering: bool
+
+
+class RejectNameReviewIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=512)
 
 
 class RetryCodeIn(BaseModel):

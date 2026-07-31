@@ -1,3 +1,4 @@
+import re
 from dataclasses import asdict
 from io import BytesIO
 from urllib.parse import quote
@@ -15,26 +16,209 @@ from ..models import (
     CodeClaim,
     CodeReservation,
     FileCode,
+    NameReviewRequest,
     Project,
     ProjectBatchItem,
     User,
+    utcnow,
 )
 from ..schemas import (
+    ApproveNameReviewIn,
     BatchDeleteIn,
     BatchItemOut,
     ManualCodeIn,
+    NameReviewOut,
     ProjectInitOut,
     ProjectOut,
+    RejectNameReviewIn,
     RetryCodeIn,
+    SpecialNumberingIn,
 )
 from ..security import CurrentSession, require_admin, require_csrf
 from ..services.abbreviations import get_abbreviation_registry
 from ..services.ai_names import NameCorrectionService
 from ..services.codes import CodeConflictError, CodeService
+from ..services.name_validation import (
+    normalized_standard_name,
+    validate_user_file_name,
+)
 from ..services.numbering import NumberingService
 from ..services.uploads import UploadError, parse_file_names
 
 router = APIRouter(prefix="/api/admin", tags=["管理员"])
+
+
+@router.get("/name-reviews", response_model=list[NameReviewOut])
+def list_name_reviews(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[NameReviewRequest]:
+    return list(
+        db.scalars(
+            select(NameReviewRequest)
+            .where(NameReviewRequest.status == "pending")
+            .order_by(NameReviewRequest.created_at)
+        )
+    )
+
+
+@router.post(
+    "/name-reviews/{review_id}/approve",
+    response_model=NameReviewOut,
+)
+async def approve_name_review(
+    review_id: int,
+    payload: ApproveNameReviewIn,
+    admin: User = Depends(require_admin),
+    _: CurrentSession = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> NameReviewRequest:
+    review = db.scalar(
+        select(NameReviewRequest)
+        .where(NameReviewRequest.id == review_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not review:
+        raise HTTPException(status_code=404, detail="审核申请不存在")
+    if review.status != "pending":
+        raise HTTPException(status_code=409, detail="该申请已处理")
+    project = db.scalar(
+        select(Project)
+        .where(Project.id == review.project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not project or project.status != "active":
+        raise HTTPException(status_code=409, detail="项目不存在或尚未启用")
+
+    service = CodeService(
+        db,
+        NumberingService(get_abbreviation_registry()),
+        NameCorrectionService(),
+    )
+    try:
+        approved_name = validate_user_file_name(payload.file_name)
+        normalized_approved = normalized_standard_name(approved_name)
+        existing = next(
+            (
+                code
+                for code in db.scalars(
+                    select(FileCode).where(
+                        FileCode.project_id == project.id,
+                        FileCode.enabled.is_(True),
+                    )
+                )
+                if normalized_standard_name(code.standard_name)
+                == normalized_approved
+            ),
+            None,
+        )
+        if existing:
+            record = existing
+        elif project.special_numbering:
+            if not payload.final_code:
+                raise HTTPException(
+                    status_code=400,
+                    detail="特殊编号项目必须由管理员填写完整编号",
+                )
+            final_code = payload.final_code.strip().upper()
+            if not re.fullmatch(r"[A-Z0-9._/-]+", final_code):
+                raise HTTPException(
+                    status_code=400,
+                    detail="人工编号只能包含字母、数字、点、横线、下划线或斜杠",
+                )
+            final_code_existing = db.scalar(
+                select(FileCode).where(FileCode.final_code == final_code)
+            )
+            if final_code_existing:
+                raise CodeConflictError(
+                    f"编号 {final_code} 已被文件"
+                    f"“{final_code_existing.standard_name}”占用"
+                )
+            service.reserve_code(project.id, final_code)
+            record = FileCode(
+                project_id=project.id,
+                original_name=approved_name,
+                standard_name=approved_name,
+                segment_a="",
+                segment_b=project.project_code,
+                segment_c="",
+                segment_d="",
+                segment_e="",
+                segment_f="",
+                segment_g="",
+                segment_h="",
+                final_code=final_code,
+                source="user_review_manual",
+                enabled=True,
+                created_by_id=admin.id,
+            )
+            db.add(record)
+            db.flush()
+        else:
+            generated = await service.preview_number(approved_name, project)
+            record, _ = service.persist_generated(
+                project,
+                generated,
+                admin,
+                source="user_review",
+                enabled=True,
+            )
+
+        review.status = "approved"
+        review.reviewed_name = record.standard_name
+        review.file_code_id = record.id
+        review.reviewed_by_id = admin.id
+        review.reviewed_at = utcnow()
+        db.commit()
+        db.refresh(review)
+        return review
+    except HTTPException:
+        db.rollback()
+        raise
+    except CodeConflictError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="编号已被其他操作占用，请刷新后重试",
+        ) from exc
+
+
+@router.post(
+    "/name-reviews/{review_id}/reject",
+    response_model=NameReviewOut,
+)
+def reject_name_review(
+    review_id: int,
+    payload: RejectNameReviewIn,
+    admin: User = Depends(require_admin),
+    _: CurrentSession = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> NameReviewRequest:
+    review = db.scalar(
+        select(NameReviewRequest)
+        .where(NameReviewRequest.id == review_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not review:
+        raise HTTPException(status_code=404, detail="审核申请不存在")
+    if review.status != "pending":
+        raise HTTPException(status_code=409, detail="该申请已处理")
+    review.status = "rejected"
+    review.issue_summary = payload.reason.strip()
+    review.reviewed_by_id = admin.id
+    review.reviewed_at = utcnow()
+    db.commit()
+    db.refresh(review)
+    return review
 
 
 def _lock_project(db: Session, project_id: int) -> Project | None:
@@ -109,6 +293,28 @@ def list_projects(
     db: Session = Depends(get_db),
 ) -> list[Project]:
     return list(db.scalars(select(Project).order_by(Project.created_at.desc())))
+
+
+@router.post(
+    "/projects/{project_id}/special-numbering",
+    response_model=ProjectOut,
+)
+def set_project_special_numbering(
+    project_id: int,
+    payload: SpecialNumberingIn,
+    _: User = Depends(require_admin),
+    __: CurrentSession = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> Project:
+    project = _lock_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if project.status == "initializing":
+        raise HTTPException(status_code=409, detail="项目正在批量生成，暂不能修改")
+    project.special_numbering = payload.special_numbering
+    db.commit()
+    db.refresh(project)
+    return project
 
 
 @router.get("/projects/{project_id}", response_model=ProjectInitOut)
@@ -211,6 +417,11 @@ def delete_project(
     file_code_ids = select(FileCode.id).where(FileCode.project_id == project_id)
     db.execute(delete(CodeClaim).where(CodeClaim.file_code_id.in_(file_code_ids)))
     db.execute(
+        delete(NameReviewRequest).where(
+            NameReviewRequest.project_id == project_id
+        )
+    )
+    db.execute(
         delete(ProjectBatchItem).where(ProjectBatchItem.project_id == project_id)
     )
     db.execute(delete(FileCode).where(FileCode.project_id == project_id))
@@ -225,6 +436,7 @@ def delete_project(
 async def initialize_project(
     project_name: str = Form(min_length=1, max_length=128),
     project_code: str = Form(pattern=r"^\d{4}$"),
+    special_numbering: bool = Form(default=False),
     file: UploadFile = File(),
     admin: User = Depends(require_admin),
     _: CurrentSession = Depends(require_csrf),
@@ -242,6 +454,7 @@ async def initialize_project(
         project_code=project_code,
         project_name=project_name,
         status="initializing",
+        special_numbering=special_numbering,
         created_by_id=admin.id,
     )
     db.add(project)
@@ -463,6 +676,15 @@ def delete_project_code(
 
     db.execute(delete(CodeClaim).where(CodeClaim.file_code_id == file_code_id))
     db.execute(
+        update(NameReviewRequest)
+        .where(NameReviewRequest.file_code_id == file_code_id)
+        .values(
+            file_code_id=None,
+            status="rejected",
+            issue_summary="审核生成的编号已由管理员删除",
+        )
+    )
+    db.execute(
         delete(ProjectBatchItem).where(
             ProjectBatchItem.file_code_id == file_code_id
         )
@@ -537,6 +759,15 @@ def batch_delete_project_files(
     if file_code_ids:
         db.execute(
             delete(CodeClaim).where(CodeClaim.file_code_id.in_(file_code_ids))
+        )
+        db.execute(
+            update(NameReviewRequest)
+            .where(NameReviewRequest.file_code_id.in_(file_code_ids))
+            .values(
+                file_code_id=None,
+                status="rejected",
+                issue_summary="审核生成的编号已由管理员删除",
+            )
         )
         db.execute(
             delete(ProjectBatchItem).where(

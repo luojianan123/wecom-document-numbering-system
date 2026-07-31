@@ -19,6 +19,7 @@ export interface Project {
   project_code: string;
   project_name: string;
   status: string;
+  special_numbering: boolean;
   created_at: string;
 }
 
@@ -48,6 +49,35 @@ export interface BatchItem {
   standard_name: string | null;
   final_code: string | null;
   error: string | null;
+}
+
+export interface SimilarName {
+  standard_name: string;
+  score: number;
+}
+
+export interface NameReview {
+  id: number;
+  project_id: number;
+  project: Project;
+  requested_by_id: number;
+  original_name: string;
+  proposed_standard_name: string | null;
+  issue_summary: string;
+  similar_names: SimilarName[];
+  status: "pending" | "approved" | "rejected";
+  reviewed_name: string | null;
+  file_code_id: number | null;
+  file_code: FileCode | null;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export interface GenerateCodeResult {
+  status: "generated" | "existing" | "pending_review";
+  message: string;
+  file_code: FileCode | null;
+  review: NameReview | null;
 }
 
 export interface ProjectInitResult {

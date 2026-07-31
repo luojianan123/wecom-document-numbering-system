@@ -1,7 +1,9 @@
 import type {
   BatchItem,
   FileCode,
+  GenerateCodeResult,
   Me,
+  NameReview,
   Project,
   ProjectInitResult,
   Role
@@ -115,11 +117,13 @@ export async function exportAdminProjectCodes(
 export async function initializeProject(
   projectName: string,
   projectCode: string,
+  specialNumbering: boolean,
   file: File
 ): Promise<ProjectInitResult> {
   const form = new FormData();
   form.append("project_name", projectName);
   form.append("project_code", projectCode);
+  form.append("special_numbering", String(specialNumbering));
   form.append("file", file);
   return request<ProjectInitResult>("/api/admin/projects/init", {
     method: "POST",
@@ -262,12 +266,66 @@ export function claimCode(fileCodeId: number): Promise<{ file_code: FileCode }> 
   return request(`/api/codes/${fileCodeId}/claim`, { method: "POST" });
 }
 
-export function generateMissingCode(projectId: number, fileName: string): Promise<FileCode> {
-  return request<FileCode>("/api/codes/generate", {
+export function generateMissingCode(
+  projectId: number,
+  fileName: string
+): Promise<GenerateCodeResult> {
+  return request<GenerateCodeResult>("/api/codes/generate", {
     method: "POST",
     body: JSON.stringify({
       project_id: projectId,
       file_name: fileName
     })
   });
+}
+
+export function listMyNameReviews(): Promise<NameReview[]> {
+  return request<NameReview[]>("/api/name-reviews/mine");
+}
+
+export function listAdminNameReviews(): Promise<NameReview[]> {
+  return request<NameReview[]>("/api/admin/name-reviews");
+}
+
+export function approveAdminNameReview(
+  reviewId: number,
+  fileName: string,
+  finalCode?: string
+): Promise<NameReview> {
+  return request<NameReview>(
+    `/api/admin/name-reviews/${reviewId}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        file_name: fileName,
+        final_code: finalCode || null
+      })
+    }
+  );
+}
+
+export function setProjectSpecialNumbering(
+  projectId: number,
+  specialNumbering: boolean
+): Promise<Project> {
+  return request<Project>(
+    `/api/admin/projects/${projectId}/special-numbering`,
+    {
+      method: "POST",
+      body: JSON.stringify({ special_numbering: specialNumbering })
+    }
+  );
+}
+
+export function rejectAdminNameReview(
+  reviewId: number,
+  reason: string
+): Promise<NameReview> {
+  return request<NameReview>(
+    `/api/admin/name-reviews/${reviewId}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason })
+    }
+  );
 }

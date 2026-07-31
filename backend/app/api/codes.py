@@ -4,12 +4,32 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import CodeClaim, FileCode, Project, User
-from ..schemas import ClaimOut, FileCodeOut, GenerateCodeIn, ProjectOut
+from ..models import (
+    CodeClaim,
+    CodeReservation,
+    FileCode,
+    NameReviewRequest,
+    Project,
+    User,
+)
+from ..schemas import (
+    ClaimOut,
+    FileCodeOut,
+    GenerateCodeIn,
+    GenerateCodeOut,
+    NameReviewOut,
+    ProjectOut,
+)
 from ..security import CurrentSession, require_csrf, require_user
 from ..services.abbreviations import get_abbreviation_registry
-from ..services.ai_names import NameCorrectionService, normalize_file_name
+from ..services.ai_names import NameCorrectionService
 from ..services.codes import CodeService
+from ..services.name_validation import (
+    find_similar_names,
+    is_obviously_unrelated_name,
+    normalized_standard_name,
+    validate_user_file_name,
+)
 from ..services.numbering import NumberingService
 
 router = APIRouter(prefix="/api", tags=["编码"])
@@ -60,7 +80,18 @@ def search_codes(
     _: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[FileCode]:
-    normalized = normalize_file_name(name)
+    project = db.get(Project, project_id)
+    if not project or project.status != "active":
+        raise HTTPException(status_code=404, detail="项目不存在或尚未启用")
+    try:
+        normalized = validate_user_file_name(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if is_obviously_unrelated_name(
+        normalized,
+        get_abbreviation_registry(),
+    ):
+        return []
     return list(
         db.scalars(
             select(FileCode)
@@ -95,13 +126,27 @@ def claim_code(
     return ClaimOut(file_code=file_code, claimed_at=claim.claimed_at)
 
 
-@router.post("/codes/generate", response_model=FileCodeOut)
+@router.get("/name-reviews/mine", response_model=list[NameReviewOut])
+def list_my_name_reviews(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[NameReviewRequest]:
+    return list(
+        db.scalars(
+            select(NameReviewRequest)
+            .where(NameReviewRequest.requested_by_id == user.id)
+            .order_by(NameReviewRequest.created_at.desc())
+        )
+    )
+
+
+@router.post("/codes/generate", response_model=GenerateCodeOut)
 async def generate_missing_code(
     payload: GenerateCodeIn,
     user: User = Depends(require_user),
     _: CurrentSession = Depends(require_csrf),
     db: Session = Depends(get_db),
-) -> FileCode:
+) -> GenerateCodeOut:
     project = db.get(Project, payload.project_id)
     if not project or project.status != "active":
         raise HTTPException(status_code=404, detail="项目不存在或尚未启用")
@@ -111,10 +156,146 @@ async def generate_missing_code(
         NameCorrectionService(),
     )
     try:
-        generated = await service.preview_number(
-            payload.file_name,
-            project,
-            check_existing=False,
+        submitted_name = validate_user_file_name(payload.file_name)
+        correction = await service.name_correction.correct(
+            submitted_name,
+            project.project_code,
+        )
+        candidate_name = correction.standard_name
+        existing_codes = list(
+            db.scalars(
+                select(FileCode).where(
+                    FileCode.project_id == project.id,
+                    FileCode.enabled.is_(True),
+                )
+            )
+        )
+        normalized_candidate = normalized_standard_name(candidate_name)
+        existing = next(
+            (
+                item
+                for item in existing_codes
+                if normalized_standard_name(item.standard_name)
+                == normalized_candidate
+            ),
+            None,
+        )
+        if existing:
+            return GenerateCodeOut(
+                status="existing",
+                message="文件名称已存在，已返回现有编号",
+                file_code=existing,
+            )
+
+        if project.special_numbering:
+            pending = db.scalar(
+                select(NameReviewRequest).where(
+                    NameReviewRequest.project_id == project.id,
+                    NameReviewRequest.requested_by_id == user.id,
+                    NameReviewRequest.status == "pending",
+                    NameReviewRequest.proposed_standard_name == candidate_name,
+                )
+            )
+            if not pending:
+                pending = NameReviewRequest(
+                    project_id=project.id,
+                    requested_by_id=user.id,
+                    original_name=payload.file_name.strip(),
+                    proposed_standard_name=candidate_name,
+                    issue_summary=(
+                        "该项目有其他编号要求，请等待管理员人工编号"
+                    ),
+                    similar_names=[],
+                )
+                db.add(pending)
+                db.commit()
+                db.refresh(pending)
+            return GenerateCodeOut(
+                status="pending_review",
+                message="该项目有其他编号要求，请等待管理员人工编号",
+                review=pending,
+            )
+
+        if is_obviously_unrelated_name(
+            candidate_name,
+            get_abbreviation_registry(),
+        ):
+            pending = db.scalar(
+                select(NameReviewRequest).where(
+                    NameReviewRequest.project_id == project.id,
+                    NameReviewRequest.requested_by_id == user.id,
+                    NameReviewRequest.status == "pending",
+                    NameReviewRequest.proposed_standard_name == candidate_name,
+                )
+            )
+            if not pending:
+                pending = NameReviewRequest(
+                    project_id=project.id,
+                    requested_by_id=user.id,
+                    original_name=payload.file_name.strip(),
+                    proposed_standard_name=candidate_name,
+                    issue_summary=(
+                        "检测到明显生活化、个人表达或非工程文件内容，"
+                        "需要管理员确认"
+                    ),
+                    similar_names=[],
+                )
+                db.add(pending)
+                db.commit()
+                db.refresh(pending)
+            return GenerateCodeOut(
+                status="pending_review",
+                message="文件名称疑似非工程内容，已提交管理员审核",
+                review=pending,
+            )
+        similar_names = find_similar_names(
+            candidate_name,
+            [item.standard_name for item in existing_codes],
+        )
+        if similar_names:
+            pending = db.scalar(
+                select(NameReviewRequest).where(
+                    NameReviewRequest.project_id == project.id,
+                    NameReviewRequest.requested_by_id == user.id,
+                    NameReviewRequest.status == "pending",
+                    NameReviewRequest.proposed_standard_name == candidate_name,
+                )
+            )
+            if not pending:
+                pending = NameReviewRequest(
+                    project_id=project.id,
+                    requested_by_id=user.id,
+                    original_name=payload.file_name.strip(),
+                    proposed_standard_name=candidate_name,
+                    issue_summary="检测到同项目相似文件名称，需要管理员确认",
+                    similar_names=[
+                        {
+                            "standard_name": item.standard_name,
+                            "score": item.score,
+                        }
+                        for item in similar_names
+                    ],
+                )
+                db.add(pending)
+                db.commit()
+                db.refresh(pending)
+            return GenerateCodeOut(
+                status="pending_review",
+                message="检测到相似文件名称，已提交管理员审核",
+                review=pending,
+            )
+
+        unavailable_final_codes = set(
+            db.scalars(select(FileCode.final_code))
+        )
+        unavailable_final_codes.update(
+            db.scalars(select(CodeReservation.final_code))
+        )
+        generated = service.numbering.generate(
+            submitted_name,
+            correction,
+            project.project_code,
+            unavailable_final_codes=unavailable_final_codes,
         )
         project = db.scalar(
             select(Project)
@@ -134,13 +315,36 @@ async def generate_missing_code(
         )
         db.commit()
         db.refresh(record)
-        return record
+        return GenerateCodeOut(
+            status="generated",
+            message="文件名称校验通过，编号已生成",
+            file_code=record,
+        )
     except HTTPException:
         db.rollback()
         raise
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            submitted_name = validate_user_file_name(payload.file_name)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        pending = NameReviewRequest(
+            project_id=project.id,
+            requested_by_id=user.id,
+            original_name=payload.file_name.strip(),
+            proposed_standard_name=submitted_name,
+            issue_summary=f"自动检测或编号失败：{exc}",
+            similar_names=[],
+        )
+        db.add(pending)
+        db.commit()
+        db.refresh(pending)
+        return GenerateCodeOut(
+            status="pending_review",
+            message="名称自动检测出现问题，已提交管理员审核",
+            review=pending,
+        )
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(
