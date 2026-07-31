@@ -7,7 +7,9 @@ COPY . .
 RUN npm run build
 
 FROM nginx:1.29-alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+ARG NGINX_SITE_CONFIG=nginx.conf
+COPY ${NGINX_SITE_CONFIG} /etc/nginx/conf.d/default.conf
+COPY cert-reloader.sh /docker-entrypoint.d/40-cert-reloader.sh
 COPY --from=build /web/dist /usr/share/nginx/html
+RUN chmod 755 /docker-entrypoint.d/40-cert-reloader.sh
 EXPOSE 80
-

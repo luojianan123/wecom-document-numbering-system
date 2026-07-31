@@ -47,6 +47,35 @@ docker compose up --build
 可使用 `samples/文件名称清单.csv` 完成首次项目初始化。
 清单中的“文件名称”不要包含项目号，项目号在管理员页面单独填写。
 
+### 生产环境 HTTPS
+
+公网仅开放自定义端口时，生产环境使用 `acme.sh` 的阿里云 DNS-01
+自动申请和续期证书，由 Nginx 在 `WEB_PORT` 上提供 HTTPS：
+
+```bash
+install -d -m 700 /opt/filecode-system/secrets
+# 将 AccessKey ID 和 Secret 分别写入 aliyun_dns_key、aliyun_dns_secret
+chmod 600 /opt/filecode-system/secrets/aliyun_dns_*
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+生产 `.env` 至少需要：
+
+```dotenv
+APP_ENV=production
+CERT_DOMAIN=pivot.ucas.com.cn
+WEB_PORT=24088
+FRONTEND_URL=https://pivot.ucas.com.cn:24088
+BACKEND_PUBLIC_URL=https://pivot.ucas.com.cn:24088
+CORS_ORIGINS=https://pivot.ucas.com.cn:24088
+COOKIE_SECURE=true
+WECOM_AUTH_MODE=live
+```
+
+阿里云 AccessKey 仅通过 Docker secrets 提供给证书容器，不会进入 Web
+或后端容器。ACME 账户、证书和私钥保存在独立数据卷中，容器重建后仍会保留；
+Nginx 检测到续期后的证书文件变化会自动安全重载。
+
 ### 分别运行
 
 后端：

@@ -1,0 +1,60 @@
+x-prod-logging: &prod-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  certificate-init:
+    image: ghcr.io/acmesh-official/acme.sh:latest
+    logging: *prod-logging
+    environment:
+      ACME_CA: ${ACME_CA:-letsencrypt}
+      CERT_DOMAIN: ${CERT_DOMAIN:-pivot.ucas.com.cn}
+    entrypoint: ["/bin/sh", "/opt/filecode/acme-bootstrap.sh"]
+    volumes:
+      - acme_data:/acme.sh
+      - tls_certs:/certs
+      - ./deploy/acme-bootstrap.sh:/opt/filecode/acme-bootstrap.sh:ro
+    secrets:
+      - aliyun_dns_key
+      - aliyun_dns_secret
+    restart: "no"
+
+  certificate-renewer:
+    image: ghcr.io/acmesh-official/acme.sh:latest
+    logging: *prod-logging
+    entrypoint: ["/bin/sh", "/opt/filecode/acme-daemon.sh"]
+    volumes:
+      - acme_data:/acme.sh
+      - tls_certs:/certs
+      - ./deploy/acme-daemon.sh:/opt/filecode/acme-daemon.sh:ro
+    secrets:
+      - aliyun_dns_key
+      - aliyun_dns_secret
+    depends_on:
+      certificate-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    build:
+      args:
+        NGINX_SITE_CONFIG: nginx.https.conf
+    environment:
+      TLS_CERT_RELOAD_ENABLED: "true"
+    volumes:
+      - tls_certs:/etc/nginx/certs:ro
+    depends_on:
+      certificate-init:
+        condition: service_completed_successfully
+
+volumes:
+  acme_data:
+  tls_certs:
+
+secrets:
+  aliyun_dns_key:
+    file: ${ALIDNS_KEY_FILE:-/opt/filecode-system/secrets/aliyun_dns_key}
+  aliyun_dns_secret:
+    file: ${ALIDNS_SECRET_FILE:-/opt/filecode-system/secrets/aliyun_dns_secret}
