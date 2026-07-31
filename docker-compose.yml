@@ -5,28 +5,13 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
-  db:
-    image: postgres:18-alpine
-    logging: *default-logging
-    environment:
-      POSTGRES_DB: filecode
-      POSTGRES_USER: filecode
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-filecode-local}
-    volumes:
-      - postgres_data:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U filecode -d filecode"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
   app:
     build:
       context: ./backend
     logging: *default-logging
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DATABASE_URL: postgresql+psycopg://filecode:${POSTGRES_PASSWORD:-filecode-local}@db:5432/filecode
+      DATABASE_URL: sqlite:////data/filecode.db
       SESSION_SECRET: ${SESSION_SECRET:-local-compose-session-secret-change-before-production}
       SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS:-28800}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
@@ -46,11 +31,9 @@ services:
       ABBREVIATION_FILE_PATH: /app/rules/文件简号.xlsx
       AUTO_CREATE_TABLES: "false"
     volumes:
+      - sqlite_data:/data
       - ./编号规则采集模板.yaml:/app/rules/编号规则采集模板.yaml:ro
       - ./文件简号.xlsx:/app/rules/文件简号.xlsx:ro
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test:
         [
@@ -74,4 +57,4 @@ services:
         condition: service_healthy
 
 volumes:
-  postgres_data:
+  sqlite_data:

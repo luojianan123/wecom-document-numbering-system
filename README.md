@@ -38,7 +38,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 docker compose up --build
 ```
 
-打开 `http://localhost:8088`。默认使用本地模拟身份，便于无企业微信密钥时开发：
+打开 `http://localhost:8088`。Docker 环境默认使用持久化 SQLite 数据卷，无需单独部署数据库。
+默认使用本地模拟身份，便于无企业微信密钥时开发：
 
 - “用户界面”进入编码领取页。
 - “管理员界面”进入项目初始化页。
