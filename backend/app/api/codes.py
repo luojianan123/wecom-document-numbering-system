@@ -292,6 +292,7 @@ async def generate_missing_code(
         similar_names = find_similar_names(
             candidate_name,
             [item.standard_name for item in existing_codes],
+            get_abbreviation_registry(),
         )
         if similar_names:
             pending, created = _get_or_create_pending_review(

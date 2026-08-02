@@ -288,14 +288,35 @@ def validate_user_file_name(value: str) -> str:
 def find_similar_names(
     candidate: str,
     existing_names: list[str],
+    abbreviations: AbbreviationRegistry,
     *,
     limit: int = 5,
 ) -> list[SimilarName]:
     normalized_candidate = normalized_standard_name(candidate)
+    candidate_subject = extract_product_subject(candidate, abbreviations)
     matches: list[SimilarName] = []
     for existing_name in existing_names:
         normalized_existing = normalized_standard_name(existing_name)
         if normalized_existing == normalized_candidate:
+            continue
+        existing_subject = extract_product_subject(existing_name, abbreviations)
+        subject_score = SequenceMatcher(
+            None,
+            candidate_subject,
+            existing_subject,
+        ).ratio()
+        shorter_subject_length = min(
+            len(candidate_subject),
+            len(existing_subject),
+        )
+        subject_is_contained = (
+            shorter_subject_length >= 3
+            and (
+                candidate_subject in existing_subject
+                or existing_subject in candidate_subject
+            )
+        )
+        if subject_score < 0.72 and not subject_is_contained:
             continue
         score = SequenceMatcher(
             None,

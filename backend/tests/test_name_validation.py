@@ -3,6 +3,7 @@ from pathlib import Path
 from app.services.abbreviations import AbbreviationRegistry
 from app.services.name_validation import (
     extract_product_subject,
+    find_similar_names,
     is_obviously_unrelated_name,
 )
 
@@ -53,3 +54,27 @@ def test_detects_only_obvious_life_or_personal_expressions() -> None:
         "李萨如图像处理模块原理图",
         registry,
     )
+
+
+def test_similarity_requires_the_same_board_or_component_subject() -> None:
+    registry = AbbreviationRegistry(ROOT / "文件简号.xlsx")
+
+    assert find_similar_names(
+        "主控板原理图",
+        ["接口板原理图", "电源板原理图", "通信模块原理图"],
+        registry,
+    ) == []
+    assert [
+        item.standard_name
+        for item in find_similar_names(
+            "主控板原理图",
+            [
+                "机载任务智能处理机S5000C主控板原理图",
+                "备用主控板原理图",
+            ],
+            registry,
+        )
+    ] == [
+        "备用主控板原理图",
+        "机载任务智能处理机S5000C主控板原理图",
+    ]

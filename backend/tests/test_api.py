@@ -284,7 +284,7 @@ def test_personal_judgement_or_person_name_document_requires_review(
     assert "疑似非工程内容" in submitted.json()["message"]
 
 
-def test_valid_new_component_name_is_generated_without_admin_review(
+def test_different_board_with_same_document_type_is_generated_without_review(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -307,7 +307,7 @@ def test_valid_new_component_name_is_generated_without_admin_review(
         files={
             "file": (
                 "files.csv",
-                "文件名称\n压缩存储单元千兆网正样件方案设计报告\n".encode(),
+                "文件名称\n主控板原理图\n".encode(),
                 "text/csv",
             )
         },
@@ -322,13 +322,13 @@ def test_valid_new_component_name_is_generated_without_admin_review(
     user_csrf = login(client, "user")
     generated = client.post(
         "/api/codes/generate",
-        json={"project_id": project_id, "file_name": "主控板原理图"},
+        json={"project_id": project_id, "file_name": "接口板原理图"},
         headers={"X-CSRF-Token": user_csrf},
     )
     assert generated.status_code == 200, generated.text
     assert generated.json()["status"] == "generated"
-    assert generated.json()["file_code"]["standard_name"] == "主控板原理图"
-    assert generated.json()["file_code"]["final_code"].startswith("GH1239-5ZK-")
+    assert generated.json()["file_code"]["standard_name"] == "接口板原理图"
+    assert generated.json()["file_code"]["final_code"].startswith("GH1239-5JK-")
     assert generated.json()["review"] is None
     assert admin_notifications == []
 
