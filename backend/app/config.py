@@ -64,10 +64,18 @@ class Settings(BaseSettings):
     @property
     def wecom_admin_user_id_set(self) -> set[str]:
         return {
-            item.strip()
+            item.strip().casefold()
             for item in self.wecom_admin_user_ids.split(",")
             if item.strip()
         }
+
+    @property
+    def wecom_admin_user_id_list(self) -> list[str]:
+        return [
+            item.strip()
+            for item in self.wecom_admin_user_ids.split(",")
+            if item.strip()
+        ]
 
     def validate_runtime_secrets(self) -> None:
         if self.is_production:
@@ -87,6 +95,7 @@ class Settings(BaseSettings):
                 "WECOM_CORP_ID": self.wecom_corp_id,
                 "WECOM_AGENT_ID": self.wecom_agent_id,
                 "WECOM_CORP_SECRET": self.wecom_corp_secret,
+                "WECOM_ADMIN_USER_IDS": self.wecom_admin_user_ids,
             }
             missing = [name for name, value in required.items() if not value]
             if missing:

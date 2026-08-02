@@ -23,17 +23,28 @@ from ..services.wecom import WeComError, wecom_client
 router = APIRouter(prefix="/api", tags=["认证"])
 
 
-def _find_or_create_user(db: Session, user_id: str, settings: Settings) -> User:
+def _find_or_create_user(
+    db: Session,
+    user_id: str,
+    settings: Settings,
+    name: str | None = None,
+) -> User:
     user = db.scalar(select(User).where(User.wecom_user_id == user_id))
-    role = "admin" if user_id in settings.wecom_admin_user_id_set else "user"
+    role = (
+        "admin"
+        if user_id.casefold() in settings.wecom_admin_user_id_set
+        else "user"
+    )
     if user:
         if user.role != role:
             user.role = role
+        if name and user.name != name:
+            user.name = name
         if not user.active:
             raise HTTPException(status_code=403, detail="当前成员已停用")
         db.commit()
         return user
-    user = User(wecom_user_id=user_id, name=user_id, role=role)
+    user = User(wecom_user_id=user_id, name=name or user_id, role=role)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -66,8 +77,8 @@ async def qr_callback(
 ) -> RedirectResponse:
     try:
         return_path = consume_auth_state(db, state, "qr")
-        user_id = await wecom_client.get_user_id(code)
-        user = _find_or_create_user(db, user_id, settings)
+        user_id, user_name = await wecom_client.get_user_identity(code)
+        user = _find_or_create_user(db, user_id, settings, user_name)
     except (AuthStateError, WeComError) as exc:
         query = urlencode({"auth_error": str(exc)})
         return RedirectResponse(

@@ -104,8 +104,12 @@ class CodeClaim(Base):
     __tablename__ = "code_claims"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    file_code_id: Mapped[int] = mapped_column(ForeignKey("file_codes.id"))
+    file_code_id: Mapped[int] = mapped_column(
+        ForeignKey("file_codes.id"),
+        index=True,
+    )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    claimant_name: Mapped[str] = mapped_column(String(128))
     claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     file_code: Mapped[FileCode] = relationship(back_populates="claims")

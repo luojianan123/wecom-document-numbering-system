@@ -8,7 +8,7 @@
 - 管理员可在项目内通过 AI 新增文件；AI 无法匹配时可手工补码，也可删除文件、编码或整个项目。
 - 用户查询、取码和复制编码。
 - 用户输入名称会拒绝纯数字、重复字符、网址、表情、特殊符号和明显无关内容。
-- 同项目内执行标准化查重和相似名称检测；存在风险时提交管理员审核。
+- 同项目内执行标准化查重和相似名称检测；所有用户新编号申请均提交管理员审核。
 - 管理员修改并确认正确名称后，系统才生成编号并返回给申请用户。
 - 管理员可将项目标记为“特殊编号项目”。管理员自行新增文件仍按正常规则编号；普通用户申请新编号时转管理员人工编号，并支持该项目自己的编号格式。
 - 板卡、软件、逻辑及操作系统类按 5 级规则判定。
@@ -104,14 +104,14 @@ WECOM_AUTH_MODE=live
 WECOM_CORP_ID=企业ID
 WECOM_AGENT_ID=自建应用AgentID
 WECOM_CORP_SECRET=自建应用Secret
-WECOM_ADMIN_USER_IDS=管理员UserID
+WECOM_ADMIN_USER_IDS=jingping.li,luojianan
 BACKEND_PUBLIC_URL=https://系统域名
 FRONTEND_URL=https://系统域名
 COOKIE_SECURE=true
 SESSION_SECRET=足够长的随机值
 ```
 
-企业微信后台的 Web 授权回调域必须与系统域名一致。`CorpSecret` 只配置在后端，不写入前端。
+企业微信后台的 Web 授权回调域必须与系统域名一致。`CorpSecret` 只配置在后端，不写入前端。多个管理员 UserID 使用英文逗号分隔；管理员会收到新编号申请提醒，审核通过后申请人会收到结果提醒。
 
 ## AI 接入
 

@@ -1,5 +1,6 @@
 import type {
   BatchItem,
+  ClaimRecord,
   FileCode,
   GenerateCodeResult,
   Me,
@@ -58,11 +59,12 @@ export async function getMe(): Promise<Me> {
   return me;
 }
 
-export async function startQrLogin(): Promise<{
+export async function startQrLogin(nextPath = "/choose-view"): Promise<{
   mode: "mock" | "live";
   authorization_url: string | null;
 }> {
-  return request("/api/auth/wecom/qr/start");
+  const params = new URLSearchParams({ next: nextPath });
+  return request(`/api/auth/wecom/qr/start?${params}`);
 }
 
 export async function devLogin(role: Role): Promise<Me> {
@@ -262,7 +264,11 @@ export function searchCodes(projectId: number, name: string): Promise<FileCode[]
   return request<FileCode[]>(`/api/codes/search?${params}`);
 }
 
-export function claimCode(fileCodeId: number): Promise<{ file_code: FileCode }> {
+export function claimCode(fileCodeId: number): Promise<{
+  file_code: FileCode;
+  claimant_name: string;
+  claimed_at: ClaimRecord["claimed_at"];
+}> {
   return request(`/api/codes/${fileCodeId}/claim`, { method: "POST" });
 }
 

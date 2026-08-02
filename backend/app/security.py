@@ -85,6 +85,16 @@ def get_current_session(
     user = db.get(User, user_id)
     if not user or not user.active:
         raise HTTPException(status_code=401, detail="用户不存在或已停用")
+    if manager.settings.wecom_auth_mode == "live":
+        expected_role = (
+            "admin"
+            if user.wecom_user_id.casefold()
+            in manager.settings.wecom_admin_user_id_set
+            else "user"
+        )
+        if user.role != expected_role:
+            user.role = expected_role
+            db.commit()
     return CurrentSession(user=user, csrf_token=csrf_token)
 
 
@@ -108,4 +118,3 @@ def require_csrf(
             detail="CSRF 校验失败",
         )
     return session
-

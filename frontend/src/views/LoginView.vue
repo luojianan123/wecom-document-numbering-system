@@ -18,7 +18,7 @@ onMounted(async () => {
     showToast(route.query.auth_error);
   }
   try {
-    const result = await startQrLogin();
+    const result = await startQrLogin("/choose-view");
     authMode.value = result.mode;
     authorizationUrl.value = result.authorization_url;
   } catch {
@@ -33,7 +33,7 @@ async function scanLogin(): Promise<void> {
       window.location.assign(authorizationUrl.value);
       return;
     }
-    const result = await startQrLogin();
+    const result = await startQrLogin("/choose-view");
     authMode.value = result.mode;
     authorizationUrl.value = result.authorization_url;
     if (authorizationUrl.value) {
@@ -52,8 +52,7 @@ async function mockLogin(role: Role): Promise<void> {
   loading.value = true;
   try {
     const me = await loginForDevelopment(role);
-    const next = typeof route.query.next === "string" ? route.query.next : "";
-    await router.replace(next || (me.user.role === "admin" ? "/admin" : "/user"));
+    await router.replace(me.user.role === "admin" ? "/choose-view" : "/user");
   } catch (error) {
     showToast(error instanceof ApiError ? error.message : "登录失败");
   } finally {

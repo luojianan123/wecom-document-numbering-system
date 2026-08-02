@@ -193,6 +193,22 @@ function showError(error: unknown): void {
   showToast(error instanceof ApiError ? error.message : "操作失败，请稍后重试");
 }
 
+function formatClaimTime(value: string): string {
+  const hasTimeZone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+  const date = new Date(hasTimeZone ? value : `${value}Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(date);
+}
+
 function showResult(value: ProjectInitResult): void {
   result.value = value;
   selectedItemKeys.value = [];
@@ -1132,6 +1148,7 @@ async function confirm(): Promise<void> {
                 <th>修正后文件名</th>
                 <th>生成编码</th>
                 <th>状态</th>
+                <th>领取记录</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -1203,6 +1220,15 @@ async function confirm(): Promise<void> {
                           : "失败"
                     }}
                   </span>
+                </td>
+                <td class="claim-history-cell">
+                  <div v-if="item.claims.length" class="claim-history">
+                    <span v-for="claim in item.claims" :key="claim.id">
+                      <strong>{{ claim.claimant_name }}</strong>
+                      <small>{{ formatClaimTime(claim.claimed_at) }}</small>
+                    </span>
+                  </div>
+                  <span v-else class="claim-history-empty">尚未领取</span>
                 </td>
                 <td class="row-actions">
                   <van-button

@@ -1,7 +1,9 @@
 import re
 from dataclasses import asdict
+from datetime import UTC, datetime
 from io import BytesIO
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -26,6 +28,7 @@ from ..schemas import (
     ApproveNameReviewIn,
     BatchDeleteIn,
     BatchItemOut,
+    CodeClaimOut,
     ManualCodeIn,
     NameReviewOut,
     ProjectInitOut,
@@ -42,10 +45,19 @@ from ..services.name_validation import (
     normalized_standard_name,
     validate_user_file_name,
 )
+from ..services.notifications import notify_review_approved
 from ..services.numbering import NumberingService
 from ..services.uploads import UploadError, parse_file_names
 
 router = APIRouter(prefix="/api/admin", tags=["管理员"])
+
+
+def _format_claimed_at(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(ZoneInfo("Asia/Shanghai")).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
 
 @router.get("/name-reviews", response_model=list[NameReviewOut])
@@ -171,8 +183,17 @@ async def approve_name_review(
         review.file_code_id = record.id
         review.reviewed_by_id = admin.id
         review.reviewed_at = utcnow()
+        requester = review.requester
         db.commit()
         db.refresh(review)
+        await notify_review_approved(
+            recipient_user_id=requester.wecom_user_id,
+            recipient_name=requester.name,
+            project_code=project.project_code,
+            project_name=project.project_name,
+            reviewed_name=record.standard_name,
+            final_code=record.final_code,
+        )
         return review
     except HTTPException:
         db.rollback()
@@ -231,6 +252,18 @@ def _lock_project(db: Session, project_id: int) -> Project | None:
 
 
 def _project_detail(db: Session, project: Project) -> ProjectInitOut:
+    claims_by_code: dict[int, list[CodeClaimOut]] = {}
+    claims = db.scalars(
+        select(CodeClaim)
+        .join(FileCode, CodeClaim.file_code_id == FileCode.id)
+        .where(FileCode.project_id == project.id)
+        .order_by(CodeClaim.claimed_at, CodeClaim.id)
+    )
+    for claim in claims:
+        claims_by_code.setdefault(claim.file_code_id, []).append(
+            CodeClaimOut.model_validate(claim)
+        )
+
     batch_items = list(
         db.scalars(
             select(ProjectBatchItem)
@@ -255,6 +288,11 @@ def _project_detail(db: Session, project: Project) -> ProjectInitOut:
                 else (item.preview_data or {}).get("final_code")
             ),
             error=item.error,
+            claims=(
+                claims_by_code.get(item.file_code_id, [])
+                if item.file_code_id is not None
+                else []
+            ),
         )
         for item in batch_items
     ]
@@ -274,6 +312,7 @@ def _project_detail(db: Session, project: Project) -> ProjectInitOut:
             success=True,
             standard_name=code.standard_name,
             final_code=code.final_code,
+            claims=claims_by_code.get(code.id, []),
         )
         for code in all_codes
         if code.id not in linked_code_ids
@@ -382,6 +421,33 @@ def export_project_codes(
     sheet.column_dimensions["B"].width = 40
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
+
+    claim_sheet = workbook.create_sheet("领取记录")
+    claim_sheet.append(["文件名称", "文件编号", "领取人", "领取时间"])
+    claim_rows = db.execute(
+        select(CodeClaim, FileCode)
+        .join(FileCode, CodeClaim.file_code_id == FileCode.id)
+        .where(FileCode.project_id == project_id)
+        .order_by(CodeClaim.claimed_at, CodeClaim.id)
+    )
+    for claim, file_code in claim_rows:
+        claim_sheet.append(
+            [
+                file_code.standard_name,
+                file_code.final_code,
+                claim.claimant_name,
+                _format_claimed_at(claim.claimed_at),
+            ]
+        )
+    for cell in claim_sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center")
+    claim_sheet.column_dimensions["A"].width = 64
+    claim_sheet.column_dimensions["B"].width = 40
+    claim_sheet.column_dimensions["C"].width = 22
+    claim_sheet.column_dimensions["D"].width = 24
+    claim_sheet.freeze_panes = "A2"
+    claim_sheet.auto_filter.ref = claim_sheet.dimensions
 
     content = BytesIO()
     workbook.save(content)

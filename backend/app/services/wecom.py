@@ -1,10 +1,14 @@
 import asyncio
+import logging
 import time
+from collections.abc import Iterable
 from urllib.parse import urlencode
 
 import httpx
 
 from ..config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class WeComError(ValueError):
@@ -79,6 +83,77 @@ class WeComClient:
                 last_error = f"{data.get('errcode')} {data.get('errmsg', '')}"
         raise WeComError(f"获取企业微信成员身份失败：{last_error}")
 
+    async def get_user_name(self, user_id: str) -> str | None:
+        access_token = await self._get_access_token()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{self.API_BASE}/cgi-bin/user/get",
+                params={"access_token": access_token, "userid": user_id},
+            )
+            response.raise_for_status()
+            data = response.json()
+        if data.get("errcode") != 0:
+            raise WeComError(
+                f"获取企业微信成员资料失败："
+                f"{data.get('errcode')} {data.get('errmsg', '')}"
+            )
+        name = data.get("name")
+        return str(name).strip() if name else None
+
+    async def get_user_identity(self, code: str) -> tuple[str, str]:
+        user_id = await self.get_user_id(code)
+        try:
+            name = await self.get_user_name(user_id)
+        except (WeComError, httpx.HTTPError, ValueError, TypeError):
+            logger.warning(
+                "无法读取企业微信成员 %s 的姓名，使用 UserID 作为显示名",
+                user_id,
+                exc_info=True,
+            )
+            name = None
+        return user_id, name or user_id
+
+    async def send_text_message(
+        self,
+        user_ids: Iterable[str],
+        content: str,
+    ) -> dict[str, object]:
+        recipients = list(
+            dict.fromkeys(item.strip() for item in user_ids if item.strip())
+        )
+        if not recipients:
+            raise WeComError("企业微信消息缺少接收人")
+        access_token = await self._get_access_token()
+        payload = {
+            "touser": "|".join(recipients),
+            "msgtype": "text",
+            "agentid": int(self.settings.wecom_agent_id),
+            "text": {"content": content},
+            "safe": 0,
+            "enable_duplicate_check": 1,
+            "duplicate_check_interval": 600,
+        }
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{self.API_BASE}/cgi-bin/message/send",
+                params={"access_token": access_token},
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+        if data.get("errcode") != 0:
+            raise WeComError(
+                f"发送企业微信应用消息失败："
+                f"{data.get('errcode')} {data.get('errmsg', '')}"
+            )
+        invalid = [
+            str(data[key])
+            for key in ("invaliduser", "unlicenseduser")
+            if data.get(key)
+        ]
+        if invalid:
+            logger.warning("企业微信消息存在无效接收人：%s", " | ".join(invalid))
+        return data
+
 
 wecom_client = WeComClient()
-

@@ -248,7 +248,7 @@ async function copyApprovedReview(review: NameReview): Promise<void> {
         <div>
           <span class="step-label">01</span>
           <h2>找到文件，领取正确编码</h2>
-          <p>选择项目并输入文件名称。名称存在风险时，系统会提交管理员审核，审核通过后再生成编号。</p>
+          <p>选择项目并输入文件名称。新编号申请会提交管理员审核，审核通过后再生成编号。</p>
         </div>
         <div class="hero-rule">AB-CD-EF-G-H</div>
       </section>
@@ -466,7 +466,7 @@ async function copyApprovedReview(review: NameReview): Promise<void> {
         <p v-if="selectedProject?.special_numbering">
           该项目有其他编号要求，提交后请等待管理员人工编号。
         </p>
-        <p v-else>系统会校验内容、标准化查重并检测相似名称；发现问题时先交管理员审核。</p>
+        <p v-else>系统会校验内容、标准化查重并提交管理员审核；审核通过后生成编号。</p>
         <div class="submitted-name">{{ searchedFileName }}</div>
         <van-button
           block

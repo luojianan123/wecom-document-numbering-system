@@ -41,6 +41,12 @@ export interface FileCode {
   enabled: boolean;
 }
 
+export interface ClaimRecord {
+  id: number;
+  claimant_name: string;
+  claimed_at: string;
+}
+
 export interface BatchItem {
   id: number | null;
   file_code_id: number | null;
@@ -49,6 +55,7 @@ export interface BatchItem {
   standard_name: string | null;
   final_code: string | null;
   error: string | null;
+  claims: ClaimRecord[];
 }
 
 export interface SimilarName {

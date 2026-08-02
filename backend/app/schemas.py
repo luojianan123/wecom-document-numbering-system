@@ -62,6 +62,14 @@ class FileCodeOut(BaseModel):
     enabled: bool
 
 
+class CodeClaimOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    claimant_name: str
+    claimed_at: datetime
+
+
 class BatchItemOut(BaseModel):
     id: int | None = None
     file_code_id: int | None = None
@@ -70,6 +78,7 @@ class BatchItemOut(BaseModel):
     standard_name: str | None = None
     final_code: str | None = None
     error: str | None = None
+    claims: list[CodeClaimOut] = Field(default_factory=list)
 
 
 class ProjectInitOut(BaseModel):
@@ -139,4 +148,5 @@ class BatchDeleteIn(BaseModel):
 
 class ClaimOut(BaseModel):
     file_code: FileCodeOut
+    claimant_name: str
     claimed_at: datetime

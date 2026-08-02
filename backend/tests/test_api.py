@@ -95,7 +95,32 @@ def test_complete_stage_one_business_flow(client: TestClient) -> None:
     )
     assert claimed.status_code == 200
     assert claimed.json()["file_code"]["final_code"].startswith("GH1234-")
+    assert claimed.json()["claimant_name"] == "普通用户"
+    assert claimed.json()["claimed_at"]
 
+    with SessionLocal() as db:
+        claim = db.scalar(
+            select(CodeClaim).where(
+                CodeClaim.file_code_id == search.json()[0]["id"]
+            )
+        )
+        assert claim is not None
+        assert claim.claimant_name == "普通用户"
+        claim.user.name = "后来改名"
+        db.commit()
+
+    admin_csrf = login(client, "admin")
+    detail = client.get(f"/api/admin/projects/{project_id}")
+    assert detail.status_code == 200, detail.text
+    claimed_item = next(
+        item
+        for item in detail.json()["items"]
+        if item["file_code_id"] == search.json()[0]["id"]
+    )
+    assert claimed_item["claims"][0]["claimant_name"] == "普通用户"
+    assert claimed_item["claims"][0]["claimed_at"]
+
+    user_csrf = login(client, "user")
     generated = client.post(
         "/api/codes/generate",
         json={
@@ -105,10 +130,21 @@ def test_complete_stage_one_business_flow(client: TestClient) -> None:
         headers={"X-CSRF-Token": user_csrf},
     )
     assert generated.status_code == 200, generated.text
-    assert generated.json()["status"] == "generated"
-    assert generated.json()["file_code"]["final_code"] == "GH1234-3TX-010SS-1.00"
-    assert generated.json()["file_code"]["standard_name"] == "通信模块使用说明书"
-    assert generated.json()["file_code"]["enabled"] is True
+    assert generated.json()["status"] == "pending_review"
+    assert generated.json()["review"]["issue_summary"] == (
+        "用户申请新增文件编号，需要管理员审核"
+    )
+
+    admin_csrf = login(client, "admin")
+    approved = client.post(
+        f"/api/admin/name-reviews/{generated.json()['review']['id']}/approve",
+        json={"file_name": "通信模块使用说明书"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["file_code"]["final_code"] == "GH1234-3TX-010SS-1.00"
+    assert approved.json()["file_code"]["standard_name"] == "通信模块使用说明书"
+    assert approved.json()["file_code"]["enabled"] is True
 
 
 def test_user_can_generate_requested_name_after_partial_match(
@@ -259,7 +295,7 @@ def test_personal_judgement_or_person_name_document_requires_review(
     assert "疑似非工程内容" in submitted.json()["message"]
 
 
-def test_new_component_name_can_be_numbered_without_matching_project_name(
+def test_new_component_name_is_submitted_for_approval(
     client: TestClient,
 ) -> None:
     admin_csrf = login(client, "admin")
@@ -291,9 +327,17 @@ def test_new_component_name_can_be_numbered_without_matching_project_name(
         headers={"X-CSRF-Token": user_csrf},
     )
     assert generated.status_code == 200, generated.text
-    assert generated.json()["status"] == "generated"
-    assert generated.json()["file_code"]["standard_name"] == "主控板原理图"
-    assert generated.json()["file_code"]["final_code"].startswith("GH1239-5ZK-")
+    assert generated.json()["status"] == "pending_review"
+
+    admin_csrf = login(client, "admin")
+    approved = client.post(
+        f"/api/admin/name-reviews/{generated.json()['review']['id']}/approve",
+        json={"file_name": "主控板原理图"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["file_code"]["standard_name"] == "主控板原理图"
+    assert approved.json()["file_code"]["final_code"].startswith("GH1239-5ZK-")
 
 
 @pytest.mark.parametrize(
@@ -343,7 +387,25 @@ def test_user_file_name_validation_rejects_invalid_content(
 
 def test_admin_approves_similar_name_review_then_user_receives_code(
     client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    admin_notifications: list[dict[str, object]] = []
+    user_notifications: list[dict[str, object]] = []
+
+    async def fake_admin_notification(**payload: object) -> None:
+        admin_notifications.append(payload)
+
+    async def fake_user_notification(**payload: object) -> None:
+        user_notifications.append(payload)
+
+    monkeypatch.setattr(
+        "app.api.codes.notify_admin_review_requested",
+        fake_admin_notification,
+    )
+    monkeypatch.setattr(
+        "app.api.admin.notify_review_approved",
+        fake_user_notification,
+    )
     admin_csrf = login(client, "admin")
     initialized = client.post(
         "/api/admin/projects/init",
@@ -371,6 +433,18 @@ def test_admin_approves_similar_name_review_then_user_receives_code(
     )
     assert submitted.status_code == 200
     review_id = submitted.json()["review"]["id"]
+    assert len(admin_notifications) == 1
+    assert admin_notifications[0]["review_id"] == review_id
+    assert admin_notifications[0]["requester_user_id"] == "user-001"
+
+    submitted_again = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "主控板原理图"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert submitted_again.status_code == 200
+    assert submitted_again.json()["review"]["id"] == review_id
+    assert len(admin_notifications) == 1
 
     admin_csrf = login(client, "admin")
     reviews = client.get("/api/admin/name-reviews")
@@ -386,6 +460,9 @@ def test_admin_approves_similar_name_review_then_user_receives_code(
     assert approved.json()["status"] == "approved"
     assert approved.json()["reviewed_name"] == "备用主控板原理图"
     assert approved.json()["file_code"]["final_code"].startswith("GH1237-")
+    assert len(user_notifications) == 1
+    assert user_notifications[0]["recipient_user_id"] == "user-001"
+    assert user_notifications[0]["reviewed_name"] == "备用主控板原理图"
 
     user_csrf = login(client, "user")
     mine = client.get("/api/name-reviews/mine")
@@ -1217,6 +1294,9 @@ def test_admin_can_export_all_stored_project_codes_to_excel(
     workbook = load_workbook(BytesIO(exported.content), read_only=True)
     sheet = workbook.active
     rows = list(sheet.iter_rows(values_only=True))
+    claim_rows = list(
+        workbook["领取记录"].iter_rows(values_only=True)
+    )
     workbook.close()
 
     assert rows[0] == ("文件名称", "文件编号")
@@ -1224,6 +1304,7 @@ def test_admin_can_export_all_stored_project_codes_to_excel(
         ("控制模块技术要求", "GH1362-3KZ-010JY-1.00"),
         ("通信模块使用说明书", "GH1362-3TX-010SS-1.00"),
     ]
+    assert claim_rows == [("文件名称", "文件编号", "领取人", "领取时间")]
 
     imported = client.post(
         f"/api/admin/projects/{project_id}/codes/import",
