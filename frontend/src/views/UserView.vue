@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { showToast } from "vant";
 import {
   ApiError,
@@ -17,6 +17,7 @@ const projects = ref<Project[]>([]);
 const selectedProjectId = ref<number | null>(null);
 const projectQuery = ref("");
 const projectOptionsVisible = ref(false);
+const projectPicker = ref<HTMLElement | null>(null);
 const productName = ref("");
 const stageName = ref("");
 const fileType = ref("");
@@ -73,6 +74,7 @@ const showGenerateAlternative = computed(
 );
 
 onMounted(async () => {
+  document.addEventListener("pointerdown", onDocumentPointerDown);
   try {
     [projects.value, reviews.value] = await Promise.all([
       listProjects(),
@@ -81,6 +83,10 @@ onMounted(async () => {
   } catch (error) {
     showError(error);
   }
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", onDocumentPointerDown);
 });
 
 function showError(error: unknown): void {
@@ -120,7 +126,19 @@ function onFileSegmentChange(): void {
 function onProjectPickerFocusOut(event: FocusEvent): void {
   const picker = event.currentTarget as HTMLElement;
   const nextTarget = event.relatedTarget;
-  if (!(nextTarget instanceof Node) || !picker.contains(nextTarget)) {
+  if (nextTarget instanceof Node && !picker.contains(nextTarget)) {
+    projectOptionsVisible.value = false;
+  }
+}
+
+function onDocumentPointerDown(event: PointerEvent): void {
+  const target = event.target;
+  if (
+    projectOptionsVisible.value &&
+    target instanceof Node &&
+    projectPicker.value &&
+    !projectPicker.value.contains(target)
+  ) {
     projectOptionsVisible.value = false;
   }
 }
@@ -264,6 +282,7 @@ async function copyApprovedReview(review: NameReview): Promise<void> {
         <label class="field-label" for="project">项目</label>
         <div
           v-if="!selectedProject"
+          ref="projectPicker"
           class="project-picker"
           @focusout="onProjectPickerFocusOut"
         >
