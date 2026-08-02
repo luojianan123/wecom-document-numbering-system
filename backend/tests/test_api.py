@@ -130,21 +130,10 @@ def test_complete_stage_one_business_flow(client: TestClient) -> None:
         headers={"X-CSRF-Token": user_csrf},
     )
     assert generated.status_code == 200, generated.text
-    assert generated.json()["status"] == "pending_review"
-    assert generated.json()["review"]["issue_summary"] == (
-        "用户申请新增文件编号，需要管理员审核"
-    )
-
-    admin_csrf = login(client, "admin")
-    approved = client.post(
-        f"/api/admin/name-reviews/{generated.json()['review']['id']}/approve",
-        json={"file_name": "通信模块使用说明书"},
-        headers={"X-CSRF-Token": admin_csrf},
-    )
-    assert approved.status_code == 200, approved.text
-    assert approved.json()["file_code"]["final_code"] == "GH1234-3TX-010SS-1.00"
-    assert approved.json()["file_code"]["standard_name"] == "通信模块使用说明书"
-    assert approved.json()["file_code"]["enabled"] is True
+    assert generated.json()["status"] == "generated"
+    assert generated.json()["file_code"]["final_code"] == "GH1234-3TX-010SS-1.00"
+    assert generated.json()["file_code"]["standard_name"] == "通信模块使用说明书"
+    assert generated.json()["file_code"]["enabled"] is True
 
 
 def test_user_can_generate_requested_name_after_partial_match(
@@ -295,9 +284,19 @@ def test_personal_judgement_or_person_name_document_requires_review(
     assert "疑似非工程内容" in submitted.json()["message"]
 
 
-def test_new_component_name_is_submitted_for_approval(
+def test_valid_new_component_name_is_generated_without_admin_review(
     client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    admin_notifications: list[dict[str, object]] = []
+
+    async def fake_admin_notification(**payload: object) -> None:
+        admin_notifications.append(payload)
+
+    monkeypatch.setattr(
+        "app.api.codes.notify_admin_review_requested",
+        fake_admin_notification,
+    )
     admin_csrf = login(client, "admin")
     initialized = client.post(
         "/api/admin/projects/init",
@@ -327,17 +326,11 @@ def test_new_component_name_is_submitted_for_approval(
         headers={"X-CSRF-Token": user_csrf},
     )
     assert generated.status_code == 200, generated.text
-    assert generated.json()["status"] == "pending_review"
-
-    admin_csrf = login(client, "admin")
-    approved = client.post(
-        f"/api/admin/name-reviews/{generated.json()['review']['id']}/approve",
-        json={"file_name": "主控板原理图"},
-        headers={"X-CSRF-Token": admin_csrf},
-    )
-    assert approved.status_code == 200, approved.text
-    assert approved.json()["file_code"]["standard_name"] == "主控板原理图"
-    assert approved.json()["file_code"]["final_code"].startswith("GH1239-5ZK-")
+    assert generated.json()["status"] == "generated"
+    assert generated.json()["file_code"]["standard_name"] == "主控板原理图"
+    assert generated.json()["file_code"]["final_code"].startswith("GH1239-5ZK-")
+    assert generated.json()["review"] is None
+    assert admin_notifications == []
 
 
 @pytest.mark.parametrize(

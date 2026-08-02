@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import (
     CodeClaim,
+    CodeReservation,
     FileCode,
     NameReviewRequest,
     Project,
@@ -22,6 +23,7 @@ from ..schemas import (
 from ..security import CurrentSession, require_csrf, require_user
 from ..services.abbreviations import get_abbreviation_registry
 from ..services.ai_names import NameCorrectionService
+from ..services.codes import CodeService
 from ..services.name_validation import (
     find_similar_names,
     is_obviously_unrelated_name,
@@ -29,6 +31,7 @@ from ..services.name_validation import (
     validate_user_file_name,
 )
 from ..services.notifications import notify_admin_review_requested
+from ..services.numbering import NumberingService
 
 router = APIRouter(prefix="/api", tags=["编码"])
 
@@ -210,6 +213,11 @@ async def generate_missing_code(
     if not project or project.status != "active":
         raise HTTPException(status_code=404, detail="项目不存在或尚未启用")
     name_correction = NameCorrectionService()
+    service = CodeService(
+        db,
+        NumberingService(get_abbreviation_registry()),
+        name_correction,
+    )
     try:
         submitted_name = validate_user_file_name(payload.file_name)
         correction = await name_correction.correct(
@@ -308,20 +316,40 @@ async def generate_missing_code(
                 review=pending,
             )
 
-        pending, created = _get_or_create_pending_review(
-            db,
-            project=project,
-            user=user,
-            original_name=payload.file_name.strip(),
-            proposed_standard_name=candidate_name,
-            issue_summary="用户申请新增文件编号，需要管理员审核",
-            similar_names=[],
+        unavailable_final_codes = set(
+            db.scalars(select(FileCode.final_code))
         )
-        await _notify_new_review(pending, project, user, created)
+        unavailable_final_codes.update(
+            db.scalars(select(CodeReservation.final_code))
+        )
+        generated = service.numbering.generate(
+            submitted_name,
+            correction,
+            project.project_code,
+            unavailable_final_codes=unavailable_final_codes,
+        )
+        project = db.scalar(
+            select(Project)
+            .where(Project.id == payload.project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if not project or project.status != "active":
+            db.rollback()
+            raise HTTPException(status_code=404, detail="项目不存在或尚未启用")
+        record, _ = service.persist_generated(
+            project,
+            generated,
+            user,
+            source="user_missing",
+            enabled=True,
+        )
+        db.commit()
+        db.refresh(record)
         return GenerateCodeOut(
-            status="pending_review",
-            message="编号申请已提交管理员审核",
-            review=pending,
+            status="generated",
+            message="文件名称校验通过，编号已生成",
+            file_code=record,
         )
     except HTTPException:
         db.rollback()
