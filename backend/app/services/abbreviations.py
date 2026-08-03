@@ -46,12 +46,8 @@ class AbbreviationRegistry:
         if not key or not code or code == "-":
             return
         existing = self._aliases.get(key)
-        if existing and (
-            existing.code != code or existing.is_software != is_software
-        ):
-            raise AbbreviationError(
-                f"文件简号规则冲突：{alias} 存在不一致的简号或软件分类"
-            )
+        if existing and (existing.code != code or existing.is_software != is_software):
+            raise AbbreviationError(f"文件简号规则冲突：{alias} 存在不一致的简号或软件分类")
         self._aliases[key] = AbbreviationMatch(
             alias=alias,
             code=code,
@@ -60,11 +56,7 @@ class AbbreviationRegistry:
 
     @staticmethod
     def _split_inline(value: str) -> list[str]:
-        parts = [
-            item.strip()
-            for item in re.split(r"[/／、]+", value)
-            if item.strip()
-        ]
+        parts = [item.strip() for item in re.split(r"[/／、]+", value) if item.strip()]
         if len(parts) < 2:
             return parts
 
@@ -160,9 +152,7 @@ class AbbreviationRegistry:
                     selected = (sheet, *columns)
                     break
             if selected is None:
-                raise AbbreviationError(
-                    "文件简号.xlsx 中未找到“文件名称”和“文件简号”列"
-                )
+                raise AbbreviationError("文件简号.xlsx 中未找到“文件名称”和“文件简号”列")
 
             sheet, name_column, code_column = selected
             grouped_rows: dict[
@@ -188,18 +178,14 @@ class AbbreviationRegistry:
                     continue
 
                 group_key: tuple[object, ...] = (
-                    ("merged", *merged_range)
-                    if merged_range is not None
-                    else ("row", row)
+                    ("merged", *merged_range) if merged_range is not None else ("row", row)
                 )
                 if group_key not in grouped_rows:
                     grouped_rows[group_key] = (code, software_section, [])
                 grouped_rows[group_key][2].append(name)
 
             if not software_marker_found:
-                raise AbbreviationError(
-                    "文件简号.xlsx 中未找到软件分界行“以下为软件：”"
-                )
+                raise AbbreviationError("文件简号.xlsx 中未找到软件分界行“以下为软件：”")
 
             shared_suffixes = {"工艺要求", "技术要求", "作业要求"}
             for code, is_software, names in grouped_rows.values():
@@ -215,10 +201,7 @@ class AbbreviationRegistry:
             workbook.close()
 
     def match(self, file_name: str) -> AbbreviationMatch:
-        targets = tuple(
-            normalize_for_match(name)
-            for name in abbreviation_match_names(file_name)
-        )
+        targets = tuple(normalize_for_match(name) for name in abbreviation_match_names(file_name))
         matches = [
             match
             for key, match in self._aliases.items()

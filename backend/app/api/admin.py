@@ -21,6 +21,7 @@ from ..models import (
     NameReviewRequest,
     Project,
     ProjectBatchItem,
+    ProjectNumberRequest,
     User,
     utcnow,
 )
@@ -32,6 +33,7 @@ from ..schemas import (
     ManualCodeIn,
     NameReviewOut,
     ProjectInitOut,
+    ProjectNumberRequestOut,
     ProjectOut,
     RejectNameReviewIn,
     RetryCodeIn,
@@ -39,14 +41,15 @@ from ..schemas import (
 )
 from ..security import CurrentSession, require_admin, require_csrf
 from ..services.abbreviations import get_abbreviation_registry
-from ..services.ai_names import NameCorrectionService
+from ..services.ai_names import NameCorrectionService, normalize_file_name
 from ..services.codes import CodeConflictError, CodeService
+from ..services.document_rules import standardize_document_terms
 from ..services.name_validation import (
     normalized_standard_name,
     validate_user_file_name,
 )
 from ..services.notifications import notify_review_approved
-from ..services.numbering import NumberingService
+from ..services.numbering import GeneratedNumber, NumberingService
 from ..services.uploads import UploadError, parse_file_names
 
 router = APIRouter(prefix="/api/admin", tags=["管理员"])
@@ -55,9 +58,66 @@ router = APIRouter(prefix="/api/admin", tags=["管理员"])
 def _format_claimed_at(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
-    return value.astimezone(ZoneInfo("Asia/Shanghai")).strftime(
-        "%Y-%m-%d %H:%M:%S"
+    return value.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _project_number_request_out(
+    request: ProjectNumberRequest,
+) -> ProjectNumberRequestOut:
+    return ProjectNumberRequestOut(
+        id=request.id,
+        project_code=request.project_code,
+        requested_by_id=request.requested_by_id,
+        requester_name=request.requester.name,
+        requester_user_id=request.requester.wecom_user_id,
+        status=request.status,
+        created_at=request.created_at,
+        processed_at=request.processed_at,
     )
+
+
+@router.get(
+    "/project-number-requests",
+    response_model=list[ProjectNumberRequestOut],
+)
+def list_project_number_requests(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[ProjectNumberRequestOut]:
+    requests = db.scalars(
+        select(ProjectNumberRequest)
+        .where(ProjectNumberRequest.status == "pending")
+        .order_by(ProjectNumberRequest.created_at)
+    )
+    return [_project_number_request_out(request) for request in requests]
+
+
+@router.post(
+    "/project-number-requests/{request_id}/process",
+    response_model=ProjectNumberRequestOut,
+)
+def process_project_number_request(
+    request_id: int,
+    admin: User = Depends(require_admin),
+    _: CurrentSession = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> ProjectNumberRequestOut:
+    request = db.scalar(
+        select(ProjectNumberRequest)
+        .where(ProjectNumberRequest.id == request_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not request:
+        raise HTTPException(status_code=404, detail="新项目编号申请不存在")
+    if request.status != "pending":
+        raise HTTPException(status_code=409, detail="该申请已处理")
+    request.status = "processed"
+    request.processed_by_id = admin.id
+    request.processed_at = utcnow()
+    db.commit()
+    db.refresh(request)
+    return _project_number_request_out(request)
 
 
 @router.get("/name-reviews", response_model=list[NameReviewOut])
@@ -121,8 +181,7 @@ async def approve_name_review(
                         FileCode.enabled.is_(True),
                     )
                 )
-                if normalized_standard_name(code.standard_name)
-                == normalized_approved
+                if normalized_standard_name(code.standard_name) == normalized_approved
             ),
             None,
         )
@@ -145,8 +204,7 @@ async def approve_name_review(
             )
             if final_code_existing:
                 raise CodeConflictError(
-                    f"编号 {final_code} 已被文件"
-                    f"“{final_code_existing.standard_name}”占用"
+                    f"编号 {final_code} 已被文件“{final_code_existing.standard_name}”占用"
                 )
             service.reserve_code(project.id, final_code)
             record = FileCode(
@@ -260,9 +318,7 @@ def _project_detail(db: Session, project: Project) -> ProjectInitOut:
         .order_by(CodeClaim.claimed_at, CodeClaim.id)
     )
     for claim in claims:
-        claims_by_code.setdefault(claim.file_code_id, []).append(
-            CodeClaimOut.model_validate(claim)
-        )
+        claims_by_code.setdefault(claim.file_code_id, []).append(CodeClaimOut.model_validate(claim))
 
     batch_items = list(
         db.scalars(
@@ -289,21 +345,15 @@ def _project_detail(db: Session, project: Project) -> ProjectInitOut:
             ),
             error=item.error,
             claims=(
-                claims_by_code.get(item.file_code_id, [])
-                if item.file_code_id is not None
-                else []
+                claims_by_code.get(item.file_code_id, []) if item.file_code_id is not None else []
             ),
         )
         for item in batch_items
     ]
 
-    linked_code_ids = {
-        item.file_code_id for item in batch_items if item.file_code_id is not None
-    }
+    linked_code_ids = {item.file_code_id for item in batch_items if item.file_code_id is not None}
     all_codes = db.scalars(
-        select(FileCode)
-        .where(FileCode.project_id == project.id)
-        .order_by(FileCode.created_at)
+        select(FileCode).where(FileCode.project_id == project.id).order_by(FileCode.created_at)
     )
     items.extend(
         BatchItemOut(
@@ -458,14 +508,8 @@ def export_project_codes(
     encoded_filename = quote(filename)
     return StreamingResponse(
         content,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        headers={
-            "Content-Disposition": (
-                f"attachment; filename*=UTF-8''{encoded_filename}"
-            )
-        },
+        media_type=("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        headers={"Content-Disposition": (f"attachment; filename*=UTF-8''{encoded_filename}")},
     )
 
 
@@ -482,18 +526,10 @@ def delete_project(
 
     file_code_ids = select(FileCode.id).where(FileCode.project_id == project_id)
     db.execute(delete(CodeClaim).where(CodeClaim.file_code_id.in_(file_code_ids)))
-    db.execute(
-        delete(NameReviewRequest).where(
-            NameReviewRequest.project_id == project_id
-        )
-    )
-    db.execute(
-        delete(ProjectBatchItem).where(ProjectBatchItem.project_id == project_id)
-    )
+    db.execute(delete(NameReviewRequest).where(NameReviewRequest.project_id == project_id))
+    db.execute(delete(ProjectBatchItem).where(ProjectBatchItem.project_id == project_id))
     db.execute(delete(FileCode).where(FileCode.project_id == project_id))
-    db.execute(
-        delete(CodeReservation).where(CodeReservation.project_id == project_id)
-    )
+    db.execute(delete(CodeReservation).where(CodeReservation.project_id == project_id))
     db.delete(project)
     db.commit()
 
@@ -680,8 +716,7 @@ def add_manual_project_code(
             )
         )
         if any(
-            (item.preview_data or {}).get("standard_name")
-            == generated.standard_name
+            (item.preview_data or {}).get("standard_name") == generated.standard_name
             for item in pending_items
         ):
             raise HTTPException(
@@ -750,16 +785,8 @@ def delete_project_code(
             issue_summary="审核生成的编号已由管理员删除",
         )
     )
-    db.execute(
-        delete(ProjectBatchItem).where(
-            ProjectBatchItem.file_code_id == file_code_id
-        )
-    )
-    db.execute(
-        delete(CodeReservation).where(
-            CodeReservation.final_code == file_code.final_code
-        )
-    )
+    db.execute(delete(ProjectBatchItem).where(ProjectBatchItem.file_code_id == file_code_id))
+    db.execute(delete(CodeReservation).where(CodeReservation.final_code == file_code.final_code))
     db.delete(file_code)
     db.commit()
 
@@ -813,19 +840,13 @@ def batch_delete_project_files(
     if any(item.file_code_id is not None for item in batch_items):
         raise HTTPException(status_code=409, detail="已入库文件必须按编码选择删除")
 
-    selected_final_codes = {
-        file_code.final_code for file_code in file_codes
-    }
+    selected_final_codes = {file_code.final_code for file_code in file_codes}
     selected_final_codes.update(
-        item.preview_final_code
-        for item in batch_items
-        if item.preview_final_code
+        item.preview_final_code for item in batch_items if item.preview_final_code
     )
 
     if file_code_ids:
-        db.execute(
-            delete(CodeClaim).where(CodeClaim.file_code_id.in_(file_code_ids))
-        )
+        db.execute(delete(CodeClaim).where(CodeClaim.file_code_id.in_(file_code_ids)))
         db.execute(
             update(NameReviewRequest)
             .where(NameReviewRequest.file_code_id.in_(file_code_ids))
@@ -835,23 +856,13 @@ def batch_delete_project_files(
                 issue_summary="审核生成的编号已由管理员删除",
             )
         )
-        db.execute(
-            delete(ProjectBatchItem).where(
-                ProjectBatchItem.file_code_id.in_(file_code_ids)
-            )
-        )
+        db.execute(delete(ProjectBatchItem).where(ProjectBatchItem.file_code_id.in_(file_code_ids)))
     if selected_final_codes:
         db.execute(
-            delete(CodeReservation).where(
-                CodeReservation.final_code.in_(selected_final_codes)
-            )
+            delete(CodeReservation).where(CodeReservation.final_code.in_(selected_final_codes))
         )
     if batch_item_ids:
-        db.execute(
-            delete(ProjectBatchItem).where(
-                ProjectBatchItem.id.in_(batch_item_ids)
-            )
-        )
+        db.execute(delete(ProjectBatchItem).where(ProjectBatchItem.id.in_(batch_item_ids)))
     if file_code_ids:
         db.execute(delete(FileCode).where(FileCode.id.in_(file_code_ids)))
     db.commit()
@@ -934,11 +945,7 @@ def confirm_project(
     try:
         for item in pending_items:
             service.persist_preview(project, item, admin)
-        db.execute(
-            update(FileCode)
-            .where(FileCode.project_id == project.id)
-            .values(enabled=True)
-        )
+        db.execute(update(FileCode).where(FileCode.project_id == project.id).values(enabled=True))
         project.status = "active"
         db.commit()
         db.refresh(project)
@@ -1097,10 +1104,26 @@ def manually_number_batch_item(
     numbering = NumberingService(get_abbreviation_registry())
     service = CodeService(db, numbering, NameCorrectionService())
     try:
-        generated = numbering.parse_manual_code(
-            payload.file_name,
-            payload.final_code,
-            project.project_code,
+        standard_name = standardize_document_terms(normalize_file_name(payload.file_name))
+        if not standard_name:
+            raise ValueError("文件名称不能为空")
+        final_code = payload.final_code.strip()
+        if not final_code:
+            raise ValueError("文件编号不能为空")
+
+        preview_data = dict(batch_item.preview_data or {})
+        generated = GeneratedNumber(
+            original_name=batch_item.original_name,
+            standard_name=standard_name,
+            segment_a=str(preview_data.get("segment_a", "")),
+            segment_b=str(preview_data.get("segment_b", project.project_code)),
+            segment_c=str(preview_data.get("segment_c", "")),
+            segment_d=str(preview_data.get("segment_d", "")),
+            segment_e=str(preview_data.get("segment_e", "")),
+            segment_f=str(preview_data.get("segment_f", "")),
+            segment_g=str(preview_data.get("segment_g", "")),
+            segment_h=str(preview_data.get("segment_h", "")),
+            final_code=final_code,
         )
         existing = db.scalar(
             select(FileCode).where(
@@ -1122,8 +1145,7 @@ def manually_number_batch_item(
             )
         )
         if any(
-            (item.preview_data or {}).get("standard_name")
-            == generated.standard_name
+            (item.preview_data or {}).get("standard_name") == generated.standard_name
             for item in pending_items
         ):
             raise CodeConflictError("该文件已在待确认列表中")
@@ -1133,8 +1155,7 @@ def manually_number_batch_item(
         )
         if existing_code:
             raise CodeConflictError(
-                f"编码 {generated.final_code} 已被文件"
-                f"“{existing_code.standard_name}”占用"
+                f"编码 {generated.final_code} 已被文件“{existing_code.standard_name}”占用"
             )
 
         previous_final_code = batch_item.preview_final_code

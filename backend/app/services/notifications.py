@@ -45,6 +45,26 @@ async def notify_admin_review_requested(
     await _send_if_live(settings.wecom_admin_user_id_list, content)
 
 
+async def notify_admin_project_number_requested(
+    *,
+    request_id: int,
+    project_code: str,
+    requester_name: str,
+    requester_user_id: str,
+) -> None:
+    settings = get_settings()
+    content = "\n".join(
+        [
+            "【新项目编号申请】",
+            f"申请人：{requester_name}（{requester_user_id}）",
+            f"申请项目号：{project_code}",
+            f"申请编号：{request_id}",
+            f"处理入口：{settings.frontend_url.rstrip('/')}/admin",
+        ]
+    )
+    await _send_if_live(settings.wecom_admin_user_id_list, content)
+
+
 async def notify_review_approved(
     *,
     recipient_user_id: str,

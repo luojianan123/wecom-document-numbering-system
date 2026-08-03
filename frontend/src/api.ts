@@ -6,6 +6,7 @@ import type {
   Me,
   NameReview,
   Project,
+  ProjectNumberRequest,
   ProjectInitResult,
   Role
 } from "./types";
@@ -87,6 +88,30 @@ export async function logout(): Promise<void> {
 
 export function listProjects(admin = false): Promise<Project[]> {
   return request<Project[]>(admin ? "/api/admin/projects" : "/api/projects");
+}
+
+export function requestNewProjectNumber(
+  projectCode: string
+): Promise<ProjectNumberRequest> {
+  return request<ProjectNumberRequest>("/api/project-number-requests", {
+    method: "POST",
+    body: JSON.stringify({ project_code: projectCode })
+  });
+}
+
+export function listAdminProjectNumberRequests(): Promise<
+  ProjectNumberRequest[]
+> {
+  return request<ProjectNumberRequest[]>("/api/admin/project-number-requests");
+}
+
+export function processAdminProjectNumberRequest(
+  requestId: number
+): Promise<ProjectNumberRequest> {
+  return request<ProjectNumberRequest>(
+    `/api/admin/project-number-requests/${requestId}/process`,
+    { method: "POST" }
+  );
 }
 
 export function listProjectCodes(projectId: number): Promise<FileCode[]> {

@@ -83,9 +83,7 @@ def upgrade() -> None:
         "缺失占号记录": missing_reservations,
         "孤立占号记录": orphan_reservations,
     }
-    details = "；".join(
-        f"{name} {count} 条" for name, count in problems.items() if count
-    )
+    details = "；".join(f"{name} {count} 条" for name, count in problems.items() if count)
     if details:
         raise RuntimeError(f"历史编号数据校验失败：{details}，请先修复后再升级")
 

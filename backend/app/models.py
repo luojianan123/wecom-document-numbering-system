@@ -40,6 +40,10 @@ class User(Base):
         back_populates="requester",
         foreign_keys="NameReviewRequest.requested_by_id",
     )
+    project_number_requests: Mapped[list["ProjectNumberRequest"]] = relationship(
+        back_populates="requester",
+        foreign_keys="ProjectNumberRequest.requested_by_id",
+    )
 
 
 class Project(Base):
@@ -164,9 +168,7 @@ class CodeReservation(Base):
 
 class NameReviewRequest(Base):
     __tablename__ = "name_review_requests"
-    __table_args__ = (
-        Index("ix_name_reviews_project_status", "project_id", "status"),
-    )
+    __table_args__ = (Index("ix_name_reviews_project_status", "project_id", "status"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
@@ -201,6 +203,31 @@ class NameReviewRequest(Base):
     )
     reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_id])
     file_code: Mapped[FileCode | None] = relationship()
+
+
+class ProjectNumberRequest(Base):
+    __tablename__ = "project_number_requests"
+    __table_args__ = (Index("ix_project_number_requests_status_created", "status", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_code: Mapped[str] = mapped_column(String(4), index=True)
+    requested_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    processed_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    requester: Mapped[User] = relationship(
+        back_populates="project_number_requests",
+        foreign_keys=[requested_by_id],
+    )
+    processor: Mapped[User | None] = relationship(foreign_keys=[processed_by_id])
 
 
 class AuthState(Base):

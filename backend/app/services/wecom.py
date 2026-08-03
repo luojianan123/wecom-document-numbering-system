@@ -94,8 +94,7 @@ class WeComClient:
             data = response.json()
         if data.get("errcode") != 0:
             raise WeComError(
-                f"获取企业微信成员资料失败："
-                f"{data.get('errcode')} {data.get('errmsg', '')}"
+                f"获取企业微信成员资料失败：{data.get('errcode')} {data.get('errmsg', '')}"
             )
         name = data.get("name")
         return str(name).strip() if name else None
@@ -118,9 +117,7 @@ class WeComClient:
         user_ids: Iterable[str],
         content: str,
     ) -> dict[str, object]:
-        recipients = list(
-            dict.fromkeys(item.strip() for item in user_ids if item.strip())
-        )
+        recipients = list(dict.fromkeys(item.strip() for item in user_ids if item.strip()))
         if not recipients:
             raise WeComError("企业微信消息缺少接收人")
         access_token = await self._get_access_token()
@@ -143,14 +140,9 @@ class WeComClient:
             data = response.json()
         if data.get("errcode") != 0:
             raise WeComError(
-                f"发送企业微信应用消息失败："
-                f"{data.get('errcode')} {data.get('errmsg', '')}"
+                f"发送企业微信应用消息失败：{data.get('errcode')} {data.get('errmsg', '')}"
             )
-        invalid = [
-            str(data[key])
-            for key in ("invaliduser", "unlicenseduser")
-            if data.get(key)
-        ]
+        invalid = [str(data[key]) for key in ("invaliduser", "unlicenseduser") if data.get(key)]
         if invalid:
             logger.warning("企业微信消息存在无效接收人：%s", " | ".join(invalid))
         return data

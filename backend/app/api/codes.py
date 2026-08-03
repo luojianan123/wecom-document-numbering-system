@@ -10,6 +10,7 @@ from ..models import (
     FileCode,
     NameReviewRequest,
     Project,
+    ProjectNumberRequest,
     User,
 )
 from ..schemas import (
@@ -18,6 +19,8 @@ from ..schemas import (
     GenerateCodeIn,
     GenerateCodeOut,
     NameReviewOut,
+    ProjectNumberRequestIn,
+    ProjectNumberRequestOut,
     ProjectOut,
 )
 from ..security import CurrentSession, require_csrf, require_user
@@ -30,10 +33,28 @@ from ..services.name_validation import (
     normalized_standard_name,
     validate_user_file_name,
 )
-from ..services.notifications import notify_admin_review_requested
+from ..services.notifications import (
+    notify_admin_project_number_requested,
+    notify_admin_review_requested,
+)
 from ..services.numbering import NumberingService
 
 router = APIRouter(prefix="/api", tags=["编码"])
+
+
+def _project_number_request_out(
+    request: ProjectNumberRequest,
+) -> ProjectNumberRequestOut:
+    return ProjectNumberRequestOut(
+        id=request.id,
+        project_code=request.project_code,
+        requested_by_id=request.requested_by_id,
+        requester_name=request.requester.name,
+        requester_user_id=request.requester.wecom_user_id,
+        status=request.status,
+        created_at=request.created_at,
+        processed_at=request.processed_at,
+    )
 
 
 def _get_or_create_pending_review(
@@ -95,12 +116,50 @@ def list_active_projects(
     db: Session = Depends(get_db),
 ) -> list[Project]:
     return list(
-        db.scalars(
-            select(Project)
-            .where(Project.status == "active")
-            .order_by(Project.project_code)
+        db.scalars(select(Project).where(Project.status == "active").order_by(Project.project_code))
+    )
+
+
+@router.post(
+    "/project-number-requests",
+    response_model=ProjectNumberRequestOut,
+)
+async def request_new_project_number(
+    payload: ProjectNumberRequestIn,
+    user: User = Depends(require_user),
+    _: CurrentSession = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> ProjectNumberRequestOut:
+    existing_project = db.scalar(
+        select(Project).where(Project.project_code == payload.project_code)
+    )
+    if existing_project:
+        raise HTTPException(status_code=409, detail="该项目号已在系统中，请从项目列表选择")
+
+    pending = db.scalar(
+        select(ProjectNumberRequest).where(
+            ProjectNumberRequest.project_code == payload.project_code,
+            ProjectNumberRequest.requested_by_id == user.id,
+            ProjectNumberRequest.status == "pending",
         )
     )
+    if pending:
+        return _project_number_request_out(pending)
+
+    request = ProjectNumberRequest(
+        project_code=payload.project_code,
+        requested_by_id=user.id,
+    )
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+    await notify_admin_project_number_requested(
+        request_id=request.id,
+        project_code=request.project_code,
+        requester_name=user.name,
+        requester_user_id=user.wecom_user_id,
+    )
+    return _project_number_request_out(request)
 
 
 @router.get(
@@ -238,8 +297,7 @@ async def generate_missing_code(
             (
                 item
                 for item in existing_codes
-                if normalized_standard_name(item.standard_name)
-                == normalized_candidate
+                if normalized_standard_name(item.standard_name) == normalized_candidate
             ),
             None,
         )
@@ -277,10 +335,7 @@ async def generate_missing_code(
                 user=user,
                 original_name=payload.file_name.strip(),
                 proposed_standard_name=candidate_name,
-                issue_summary=(
-                    "检测到明显生活化、个人表达或非工程文件内容，"
-                    "需要管理员确认"
-                ),
+                issue_summary=("检测到明显生活化、个人表达或非工程文件内容，需要管理员确认"),
                 similar_names=[],
             )
             await _notify_new_review(pending, project, user, created)
@@ -317,12 +372,8 @@ async def generate_missing_code(
                 review=pending,
             )
 
-        unavailable_final_codes = set(
-            db.scalars(select(FileCode.final_code))
-        )
-        unavailable_final_codes.update(
-            db.scalars(select(CodeReservation.final_code))
-        )
+        unavailable_final_codes = set(db.scalars(select(FileCode.final_code)))
+        unavailable_final_codes.update(db.scalars(select(CodeReservation.final_code)))
         generated = service.numbering.generate(
             submitted_name,
             correction,

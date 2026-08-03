@@ -13,6 +13,7 @@ from app.models import (
     FileCode,
     Project,
     ProjectBatchItem,
+    ProjectNumberRequest,
     User,
 )
 
@@ -36,14 +37,54 @@ def test_health_and_mock_auth(client: TestClient) -> None:
     assert me.json()["csrf_token"] == csrf
 
 
+def test_user_can_request_missing_project_number_and_admin_can_process_it(
+    client: TestClient,
+) -> None:
+    user_csrf = login(client, "user", "project-requester")
+    created = client.post(
+        "/api/project-number-requests",
+        json={"project_code": "9876"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert created.status_code == 200, created.text
+    request = created.json()
+    assert request["project_code"] == "9876"
+    assert request["requester_name"] == "普通用户"
+    assert request["requester_user_id"] == "project-requester"
+    assert request["status"] == "pending"
+
+    duplicate = client.post(
+        "/api/project-number-requests",
+        json={"project_code": "9876"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["id"] == request["id"]
+
+    admin_csrf = login(client, "admin")
+    pending = client.get("/api/admin/project-number-requests")
+    assert pending.status_code == 200, pending.text
+    assert [item["id"] for item in pending.json()] == [request["id"]]
+
+    processed = client.post(
+        f"/api/admin/project-number-requests/{request['id']}/process",
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert processed.status_code == 200, processed.text
+    assert processed.json()["status"] == "processed"
+    assert processed.json()["processed_at"] is not None
+    assert client.get("/api/admin/project-number-requests").json() == []
+
+    with SessionLocal() as db:
+        stored = db.get(ProjectNumberRequest, request["id"])
+        assert stored is not None
+        assert stored.status == "processed"
+        assert stored.processed_by_id is not None
+
+
 def test_complete_stage_one_business_flow(client: TestClient) -> None:
     admin_csrf = login(client, "admin")
-    csv_content = (
-        "文件名称\n"
-        "控制模块技术要求\n"
-        "控制模块正样件技术要求\n"
-        "控制PCB加工要求\n"
-    ).encode()
+    csv_content = ("文件名称\n控制模块技术要求\n控制模块正样件技术要求\n控制PCB加工要求\n").encode()
     initialized = client.post(
         "/api/admin/projects/init",
         data={"project_name": "测试项目", "project_code": "1234"},
@@ -99,11 +140,7 @@ def test_complete_stage_one_business_flow(client: TestClient) -> None:
     assert claimed.json()["claimed_at"]
 
     with SessionLocal() as db:
-        claim = db.scalar(
-            select(CodeClaim).where(
-                CodeClaim.file_code_id == search.json()[0]["id"]
-            )
-        )
+        claim = db.scalar(select(CodeClaim).where(CodeClaim.file_code_id == search.json()[0]["id"]))
         assert claim is not None
         assert claim.claimant_name == "普通用户"
         claim.user.name = "后来改名"
@@ -113,9 +150,7 @@ def test_complete_stage_one_business_flow(client: TestClient) -> None:
     detail = client.get(f"/api/admin/projects/{project_id}")
     assert detail.status_code == 200, detail.text
     claimed_item = next(
-        item
-        for item in detail.json()["items"]
-        if item["file_code_id"] == search.json()[0]["id"]
+        item for item in detail.json()["items"] if item["file_code_id"] == search.json()[0]["id"]
     )
     assert claimed_item["claims"][0]["claimant_name"] == "普通用户"
     assert claimed_item["claims"][0]["claimed_at"]
@@ -146,10 +181,7 @@ def test_user_can_generate_requested_name_after_partial_match(
         files={
             "file": (
                 "files.csv",
-                (
-                    "文件名称\n"
-                    "机载任务智能处理机S5000C主控板原理图\n"
-                ).encode(),
+                ("文件名称\n机载任务智能处理机S5000C主控板原理图\n").encode(),
                 "text/csv",
             )
         },
@@ -168,10 +200,7 @@ def test_user_can_generate_requested_name_after_partial_match(
     )
     assert partial.status_code == 200
     assert len(partial.json()) == 1
-    assert (
-        partial.json()[0]["standard_name"]
-        == "机载任务智能处理机S5000C主控板原理图"
-    )
+    assert partial.json()[0]["standard_name"] == "机载任务智能处理机S5000C主控板原理图"
 
     generated = client.post(
         "/api/codes/generate",
@@ -203,9 +232,7 @@ def test_unrelated_project_name_is_submitted_for_admin_review(
             "file": (
                 "files.csv",
                 (
-                    "文件名称\n"
-                    "机载任务智能处理机主控板原理图\n"
-                    "机上实时任务管控软件测试报告\n"
+                    "文件名称\n机载任务智能处理机主控板原理图\n机上实时任务管控软件测试报告\n"
                 ).encode(),
                 "text/csv",
             )
@@ -465,10 +492,7 @@ def test_admin_approves_similar_name_review_then_user_receives_code(
 
     admin_csrf = login(client, "admin")
     deleted = client.delete(
-        (
-            f"/api/admin/projects/{project_id}/codes/"
-            f"{approved.json()['file_code_id']}"
-        ),
+        (f"/api/admin/projects/{project_id}/codes/{approved.json()['file_code_id']}"),
         headers={"X-CSRF-Token": admin_csrf},
     )
     assert deleted.status_code == 204
@@ -686,11 +710,7 @@ def test_admin_can_manually_add_code_when_ai_cannot_match(
     )
     assert confirmed_again.status_code == 200
     with SessionLocal() as db:
-        record = db.scalar(
-            select(FileCode).where(
-                FileCode.final_code == "R-GH8765-5KZ-010X2-1.00"
-            )
-        )
+        record = db.scalar(select(FileCode).where(FileCode.final_code == "R-GH8765-5KZ-010X2-1.00"))
         assert record is not None
         assert record.source == "admin_batch"
 
@@ -703,10 +723,7 @@ def test_admin_can_manually_add_code_when_ai_cannot_match(
         headers={"X-CSRF-Token": admin_csrf},
     )
     assert review_report.status_code == 200, review_report.text
-    assert (
-        review_report.json()["final_code"]
-        == "P-GH8765-3KZ-010X3-1.00"
-    )
+    assert review_report.json()["final_code"] == "P-GH8765-3KZ-010X3-1.00"
     assert review_report.json()["file_code_id"] is None
 
 
@@ -770,10 +787,7 @@ def test_admin_can_manually_fix_and_retry_failed_batch_item(
     assert pending_detail.json()["failure_count"] == 1
 
     retried = client.post(
-        (
-            f"/api/admin/projects/{batch['project']['id']}"
-            f"/batch-items/{batch_item_id}/retry"
-        ),
+        (f"/api/admin/projects/{batch['project']['id']}/batch-items/{batch_item_id}/retry"),
         json={"file_name": "控制模块技术要求"},
         headers={"X-CSRF-Token": admin_csrf},
     )
@@ -819,20 +833,17 @@ def test_admin_can_manually_number_failed_batch_item(
     assert item["success"] is False
 
     manual = client.post(
-        (
-            f"/api/admin/projects/{batch['project']['id']}"
-            f"/batch-items/{item['id']}/manual"
-        ),
+        (f"/api/admin/projects/{batch['project']['id']}/batch-items/{item['id']}/manual"),
         json={
             "file_name": "人工控制文件",
-            "final_code": "GH5680-3KZ-010RG-1.00",
+            "final_code": "人工编号 / 5680（A版）",
         },
         headers={"X-CSRF-Token": admin_csrf},
     )
     assert manual.status_code == 200, manual.text
     assert manual.json()["success"] is True
     assert manual.json()["standard_name"] == "人工控制文件"
-    assert manual.json()["final_code"] == "GH5680-3KZ-010RG-1.00"
+    assert manual.json()["final_code"] == "人工编号 / 5680（A版）"
 
     confirmed = client.post(
         f"/api/admin/projects/{batch['project']['id']}/confirm",
@@ -858,11 +869,7 @@ def test_admin_can_edit_successful_pending_batch_item(
         files={
             "file": (
                 "files.csv",
-                (
-                    "文件名称\n"
-                    "控制模块技术要求\n"
-                    "通信模块使用说明书\n"
-                ).encode(),
+                ("文件名称\n控制模块技术要求\n通信模块使用说明书\n").encode(),
                 "text/csv",
             )
         },
@@ -872,13 +879,10 @@ def test_admin_can_edit_successful_pending_batch_item(
     item = batch["items"][0]
     original_code = item["final_code"]
     occupied_code = batch["items"][1]["final_code"]
-    updated_code = "GH5681-3KZ-010X1-1.00"
+    updated_code = "任意格式 / 文件编号（修订A）"
 
     conflict = client.post(
-        (
-            f"/api/admin/projects/{batch['project']['id']}"
-            f"/batch-items/{item['id']}/manual"
-        ),
+        (f"/api/admin/projects/{batch['project']['id']}/batch-items/{item['id']}/manual"),
         json={
             "file_name": "人工修正控制文件",
             "final_code": occupied_code,
@@ -890,10 +894,7 @@ def test_admin_can_edit_successful_pending_batch_item(
         assert db.get(CodeReservation, original_code) is not None
 
     modified = client.post(
-        (
-            f"/api/admin/projects/{batch['project']['id']}"
-            f"/batch-items/{item['id']}/manual"
-        ),
+        (f"/api/admin/projects/{batch['project']['id']}/batch-items/{item['id']}/manual"),
         json={
             "file_name": "人工修正控制文件",
             "final_code": updated_code,
@@ -915,9 +916,7 @@ def test_admin_can_edit_successful_pending_batch_item(
     )
     assert confirmed.status_code == 200, confirmed.text
     with SessionLocal() as db:
-        stored = db.scalar(
-            select(FileCode).where(FileCode.final_code == updated_code)
-        )
+        stored = db.scalar(select(FileCode).where(FileCode.final_code == updated_code))
         assert stored is not None
         assert stored.standard_name == "人工修正控制文件"
 
@@ -947,19 +946,13 @@ def test_batch_successes_are_only_persisted_after_admin_confirmation(
     with SessionLocal() as db:
         assert db.scalar(select(func.count()).select_from(FileCode)) == 0
         staged = list(
-            db.scalars(
-                select(ProjectBatchItem).where(
-                    ProjectBatchItem.project_id == project_id
-                )
-            )
+            db.scalars(select(ProjectBatchItem).where(ProjectBatchItem.project_id == project_id))
         )
         assert len(staged) == 2
         assert all(item.preview_data for item in staged)
         assert all(item.file_code_id is None for item in staged)
         assert all(item.preview_final_code for item in staged)
-        assert (
-            db.scalar(select(func.count()).select_from(CodeReservation)) == 2
-        )
+        assert db.scalar(select(func.count()).select_from(CodeReservation)) == 2
 
         project = db.get(Project, project_id)
         assert project is not None
@@ -995,22 +988,14 @@ def test_batch_successes_are_only_persisted_after_admin_confirmation(
     with SessionLocal() as db:
         codes = list(
             db.scalars(
-                select(FileCode)
-                .where(FileCode.project_id == project_id)
-                .order_by(FileCode.id)
+                select(FileCode).where(FileCode.project_id == project_id).order_by(FileCode.id)
             )
         )
         assert len(codes) == 2
         assert all(code.enabled for code in codes)
-        assert (
-            db.scalar(select(func.count()).select_from(CodeReservation)) == 2
-        )
+        assert db.scalar(select(func.count()).select_from(CodeReservation)) == 2
         staged = list(
-            db.scalars(
-                select(ProjectBatchItem).where(
-                    ProjectBatchItem.project_id == project_id
-                )
-            )
+            db.scalars(select(ProjectBatchItem).where(ProjectBatchItem.project_id == project_id))
         )
         assert all(item.file_code_id is not None for item in staged)
 
@@ -1140,9 +1125,7 @@ def test_admin_can_manage_project_files_codes_and_delete_project(
         assert db.get(Project, project_id) is None
         assert (
             db.scalar(
-                select(func.count())
-                .select_from(FileCode)
-                .where(FileCode.project_id == project_id)
+                select(func.count()).select_from(FileCode).where(FileCode.project_id == project_id)
             )
             == 0
         )
@@ -1192,11 +1175,7 @@ def test_active_project_import_marks_duplicates_and_stages_new_files(
         files={
             "file": (
                 "new-files.csv",
-                (
-                    "文件名称\n"
-                    "控制模块技术要求\n"
-                    "通信模块使用说明书\n"
-                ).encode(),
+                ("文件名称\n控制模块技术要求\n通信模块使用说明书\n").encode(),
                 "text/csv",
             )
         },
@@ -1207,13 +1186,10 @@ def test_active_project_import_marks_duplicates_and_stages_new_files(
     duplicate = next(
         item
         for item in detail["items"]
-        if item["original_name"] == "控制模块技术要求"
-        and item["file_code_id"] is None
+        if item["original_name"] == "控制模块技术要求" and item["file_code_id"] is None
     )
     pending = next(
-        item
-        for item in detail["items"]
-        if item["original_name"] == "通信模块使用说明书"
+        item for item in detail["items"] if item["original_name"] == "通信模块使用说明书"
     )
     assert duplicate["success"] is False
     assert duplicate["error"].startswith("已重复：")
@@ -1223,9 +1199,7 @@ def test_active_project_import_marks_duplicates_and_stages_new_files(
     with SessionLocal() as db:
         assert (
             db.scalar(
-                select(func.count())
-                .select_from(FileCode)
-                .where(FileCode.project_id == project_id)
+                select(func.count()).select_from(FileCode).where(FileCode.project_id == project_id)
             )
             == 1
         )
@@ -1238,9 +1212,7 @@ def test_active_project_import_marks_duplicates_and_stages_new_files(
     with SessionLocal() as db:
         assert (
             db.scalar(
-                select(func.count())
-                .select_from(FileCode)
-                .where(FileCode.project_id == project_id)
+                select(func.count()).select_from(FileCode).where(FileCode.project_id == project_id)
             )
             == 2
         )
@@ -1256,11 +1228,7 @@ def test_admin_can_export_all_stored_project_codes_to_excel(
         files={
             "file": (
                 "files.csv",
-                (
-                    "文件名称\n"
-                    "控制模块技术要求\n"
-                    "通信模块使用说明书\n"
-                ).encode(),
+                ("文件名称\n控制模块技术要求\n通信模块使用说明书\n").encode(),
                 "text/csv",
             )
         },
@@ -1287,9 +1255,7 @@ def test_admin_can_export_all_stored_project_codes_to_excel(
     workbook = load_workbook(BytesIO(exported.content), read_only=True)
     sheet = workbook.active
     rows = list(sheet.iter_rows(values_only=True))
-    claim_rows = list(
-        workbook["领取记录"].iter_rows(values_only=True)
-    )
+    claim_rows = list(workbook["领取记录"].iter_rows(values_only=True))
     workbook.close()
 
     assert rows[0] == ("文件名称", "文件编号")
@@ -1304,11 +1270,7 @@ def test_admin_can_export_all_stored_project_codes_to_excel(
         files={
             "file": (
                 "added.csv",
-                (
-                    "文件名称\n"
-                    "控制模块技术要求\n"
-                    "显示模块使用说明书\n"
-                ).encode(),
+                ("文件名称\n控制模块技术要求\n显示模块使用说明书\n").encode(),
                 "text/csv",
             )
         },
@@ -1330,11 +1292,7 @@ def test_admin_can_batch_delete_mixed_project_files(
         files={
             "file": (
                 "files.csv",
-                (
-                    "文件名称\n"
-                    "控制模块技术要求\n"
-                    "通信模块使用说明书\n"
-                ).encode(),
+                ("文件名称\n控制模块技术要求\n通信模块使用说明书\n").encode(),
                 "text/csv",
             )
         },
@@ -1361,11 +1319,7 @@ def test_admin_can_batch_delete_mixed_project_files(
         files={
             "file": (
                 "added.csv",
-                (
-                    "文件名称\n"
-                    "控制模块技术要求\n"
-                    "显示模块使用说明书\n"
-                ).encode(),
+                ("文件名称\n控制模块技术要求\n显示模块使用说明书\n").encode(),
                 "text/csv",
             )
         },
@@ -1377,9 +1331,7 @@ def test_admin_can_batch_delete_mixed_project_files(
         if not item["success"] and item["error"].startswith("已重复：")
     )
     pending = next(
-        item
-        for item in imported["items"]
-        if item["success"] and item["file_code_id"] is None
+        item for item in imported["items"] if item["success"] and item["file_code_id"] is None
     )
 
     deleted = client.post(
@@ -1407,9 +1359,7 @@ def test_admin_can_batch_delete_mixed_project_files(
         assert db.get(CodeReservation, pending["final_code"]) is None
 
         remaining_codes = list(
-            db.scalars(
-                select(FileCode).where(FileCode.project_id == project_id)
-            )
+            db.scalars(select(FileCode).where(FileCode.project_id == project_id))
         )
         assert len(remaining_codes) == 1
 

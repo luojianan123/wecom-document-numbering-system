@@ -30,11 +30,7 @@ def _find_or_create_user(
     name: str | None = None,
 ) -> User:
     user = db.scalar(select(User).where(User.wecom_user_id == user_id))
-    role = (
-        "admin"
-        if user_id.casefold() in settings.wecom_admin_user_id_set
-        else "user"
-    )
+    role = "admin" if user_id.casefold() in settings.wecom_admin_user_id_set else "user"
     if user:
         if user.role != role:
             user.role = role

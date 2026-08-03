@@ -64,25 +64,16 @@ class Settings(BaseSettings):
     @property
     def wecom_admin_user_id_set(self) -> set[str]:
         return {
-            item.strip().casefold()
-            for item in self.wecom_admin_user_ids.split(",")
-            if item.strip()
+            item.strip().casefold() for item in self.wecom_admin_user_ids.split(",") if item.strip()
         }
 
     @property
     def wecom_admin_user_id_list(self) -> list[str]:
-        return [
-            item.strip()
-            for item in self.wecom_admin_user_ids.split(",")
-            if item.strip()
-        ]
+        return [item.strip() for item in self.wecom_admin_user_ids.split(",") if item.strip()]
 
     def validate_runtime_secrets(self) -> None:
         if self.is_production:
-            if (
-                self.session_secret == "development-only-change-me"
-                or len(self.session_secret) < 32
-            ):
+            if self.session_secret == "development-only-change-me" or len(self.session_secret) < 32:
                 raise RuntimeError("生产环境必须配置至少 32 位的 SESSION_SECRET")
             if not self.cookie_secure:
                 raise RuntimeError("生产环境必须启用 COOKIE_SECURE")

@@ -69,9 +69,7 @@ class NameCorrectionService:
         if self.settings.ai_mode == "rules":
             return self._rules_correction(normalized)
         correction = await self._model_correction(normalized, project_code)
-        standard_name = standardize_document_terms(
-            normalize_file_name(correction.standard_name)
-        )
+        standard_name = standardize_document_terms(normalize_file_name(correction.standard_name))
         return correction.model_copy(
             update={
                 "standard_name": standard_name,
@@ -86,13 +84,7 @@ class NameCorrectionService:
     def _rules_correction(file_name: str) -> NameCorrection:
         level = determine_component_level(file_name)
         standard_name = standardize_document_terms(file_name)
-        stage = (
-            "正样件"
-            if "正样件" in file_name
-            else "鉴定件"
-            if "鉴定件" in file_name
-            else None
-        )
+        stage = "正样件" if "正样件" in file_name else "鉴定件" if "鉴定件" in file_name else None
         return NameCorrection(
             standard_name=standard_name,
             component_level=level,

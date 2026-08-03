@@ -119,8 +119,7 @@ def _parse_device_count(value: str) -> int:
 
 def _device_counts(value: str) -> tuple[int, ...]:
     return tuple(
-        _parse_device_count(match.group("count"))
-        for match in DEVICE_COUNT_PATTERN.finditer(value)
+        _parse_device_count(match.group("count")) for match in DEVICE_COUNT_PATTERN.finditer(value)
     )
 
 
@@ -153,17 +152,15 @@ def determine_component_level(
         return "7"
     if any(keyword in normalized for keyword in LEVEL_FIVE_KEYWORDS):
         return "5"
-    if (
-        any(keyword in normalized for keyword in BOARD_ASSEMBLY_KEYWORDS)
-        or BOARD_ASSEMBLY_PATTERN.search(normalized)
-    ):
+    if any(
+        keyword in normalized for keyword in BOARD_ASSEMBLY_KEYWORDS
+    ) or BOARD_ASSEMBLY_PATTERN.search(normalized):
         return "5"
 
     device_counts = _device_counts(normalized)
     has_system_context = "系统" in normalized
     if has_system_context and (
-        any(count >= 2 for count in device_counts)
-        or MULTI_DEVICE_WORD_PATTERN.search(normalized)
+        any(count >= 2 for count in device_counts) or MULTI_DEVICE_WORD_PATTERN.search(normalized)
     ):
         return "2"
 

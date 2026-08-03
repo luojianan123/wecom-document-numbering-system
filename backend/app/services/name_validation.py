@@ -245,9 +245,7 @@ def is_obviously_unrelated_name(
         and re.fullmatch(r"[\u4e00-\u9fff]+", candidate_subject) is not None
         and candidate_subject[0] in COMMON_CHINESE_SURNAMES
     )
-    has_engineering_subject = any(
-        word in candidate_subject for word in ENGINEERING_SUBJECT_WORDS
-    )
+    has_engineering_subject = any(word in candidate_subject for word in ENGINEERING_SUBJECT_WORDS)
     return is_short_chinese_name and not has_engineering_subject
 
 
@@ -260,9 +258,8 @@ def validate_user_file_name(value: str) -> str:
         raise FileNameValidationError("文件名称不能为空")
     if PURE_NUMBER_PATTERN.fullmatch(normalized):
         raise FileNameValidationError("文件名称不能为纯数字")
-    if (
-        REPEATED_CHARACTER_PATTERN.fullmatch(normalized)
-        or REPEATED_GROUP_PATTERN.fullmatch(normalized)
+    if REPEATED_CHARACTER_PATTERN.fullmatch(normalized) or REPEATED_GROUP_PATTERN.fullmatch(
+        normalized
     ):
         raise FileNameValidationError("文件名称不能使用无意义重复字符")
     if MEANINGLESS_LATIN_PATTERN.fullmatch(normalized):
@@ -309,12 +306,8 @@ def find_similar_names(
             len(candidate_subject),
             len(existing_subject),
         )
-        subject_is_contained = (
-            shorter_subject_length >= 3
-            and (
-                candidate_subject in existing_subject
-                or existing_subject in candidate_subject
-            )
+        subject_is_contained = shorter_subject_length >= 3 and (
+            candidate_subject in existing_subject or existing_subject in candidate_subject
         )
         if subject_score < 0.72 and not subject_is_contained:
             continue
@@ -327,12 +320,9 @@ def find_similar_names(
             len(normalized_candidate),
             len(normalized_existing),
         )
-        is_contained = (
-            shorter_length >= 4
-            and (
-                normalized_candidate in normalized_existing
-                or normalized_existing in normalized_candidate
-            )
+        is_contained = shorter_length >= 4 and (
+            normalized_candidate in normalized_existing
+            or normalized_existing in normalized_candidate
         )
         if score >= 0.72 or is_contained:
             matches.append(SimilarName(existing_name, round(score, 3)))

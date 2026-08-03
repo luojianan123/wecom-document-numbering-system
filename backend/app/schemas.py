@@ -42,6 +42,21 @@ class ProjectOut(BaseModel):
     created_at: datetime
 
 
+class ProjectNumberRequestIn(BaseModel):
+    project_code: str = Field(pattern=r"^\d{4}$")
+
+
+class ProjectNumberRequestOut(BaseModel):
+    id: int
+    project_code: str
+    requested_by_id: int
+    requester_name: str
+    requester_user_id: str
+    status: Literal["pending", "processed"]
+    created_at: datetime
+    processed_at: datetime | None
+
+
 class FileCodeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

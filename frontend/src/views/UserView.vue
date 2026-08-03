@@ -8,6 +8,7 @@ import {
   listMyNameReviews,
   listProjectCodes,
   listProjects,
+  requestNewProjectNumber,
   searchCodes
 } from "../api";
 import AppHeader from "../components/AppHeader.vue";
@@ -29,6 +30,7 @@ const loadingAll = ref(false);
 const generating = ref(false);
 const reviews = ref<NameReview[]>([]);
 const loadingReviews = ref(false);
+const requestingProjectNumber = ref(false);
 
 const selectedProject = computed(() =>
   projects.value.find((item) => item.id === selectedProjectId.value)
@@ -159,6 +161,24 @@ function clearSelectedProject(): void {
   resetResults();
 }
 
+async function requestProjectNumber(): Promise<void> {
+  const requestedProjectCode = projectQuery.value.trim();
+  if (!/^\d{4}$/.test(requestedProjectCode)) {
+    showToast("请先输入4位项目号");
+    return;
+  }
+  requestingProjectNumber.value = true;
+  try {
+    await requestNewProjectNumber(requestedProjectCode);
+    projectOptionsVisible.value = false;
+    showToast("已提交新项目编号申请，并通知管理员");
+  } catch (error) {
+    showError(error);
+  } finally {
+    requestingProjectNumber.value = false;
+  }
+}
+
 async function search(): Promise<void> {
   if (!selectedProjectId.value) {
     showToast("请选择项目");
@@ -286,16 +306,27 @@ async function copyApprovedReview(review: NameReview): Promise<void> {
           class="project-picker"
           @focusout="onProjectPickerFocusOut"
         >
-          <van-field
-            id="project"
-            v-model="projectQuery"
-            class="project-picker-input"
-            placeholder="输入项目号或项目名称搜索"
-            clearable
-            autocomplete="off"
-            @focus="projectOptionsVisible = true"
-            @update:model-value="onProjectQueryChange"
-          />
+          <div class="project-request-row">
+            <van-field
+              id="project"
+              v-model="projectQuery"
+              class="project-picker-input"
+              placeholder="输入项目号或项目名称搜索"
+              clearable
+              autocomplete="off"
+              @focus="projectOptionsVisible = true"
+              @update:model-value="onProjectQueryChange"
+            />
+            <van-button
+              class="project-request-button"
+              color="#b4532a"
+              :loading="requestingProjectNumber"
+              loading-text="提交中…"
+              @click="requestProjectNumber"
+            >
+              申请新项目编号
+            </van-button>
+          </div>
           <div
             v-if="projectOptionsVisible"
             class="project-picker-results"

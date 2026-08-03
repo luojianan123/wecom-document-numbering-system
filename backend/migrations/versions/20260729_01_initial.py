@@ -108,4 +108,3 @@ def downgrade() -> None:
     op.drop_table("projects")
     op.drop_index("ix_users_wecom_user_id", table_name="users")
     op.drop_table("users")
-

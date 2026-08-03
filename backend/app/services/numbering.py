@@ -107,36 +107,35 @@ class NumberingService:
         except AbbreviationError:
             pass
 
-        if matched_abbreviation is not None:
-            generated = self._build_number(
-                original_name=original_name,
-                source_name=source_name,
-                standard_name=standard_name,
-                project_code=project_code,
-                correction=correction,
-                abbreviation=matched_abbreviation,
-            )
-            if generated.final_code not in unavailable_final_codes:
-                return generated
-
-        fallback_abbreviations = self._fallback_abbreviation_candidates(
-            standard_name
+        # 文件简号是文件类型的固定属性。只要 Excel 能匹配，
+        # 即使编号冲突也不能改 F 段，只能轮换前面的功能码 D 段。
+        abbreviations = (
+            (matched_abbreviation,)
+            if matched_abbreviation is not None
+            else self._fallback_abbreviation_candidates(standard_name)
         )
-        for abbreviation in fallback_abbreviations:
-            generated = self._build_number(
-                original_name=original_name,
-                source_name=source_name,
-                standard_name=standard_name,
-                project_code=project_code,
-                correction=correction,
-                abbreviation=abbreviation,
-            )
-            if generated.final_code not in unavailable_final_codes:
-                return generated
-
-        if not fallback_abbreviations:
+        if not abbreviations:
             raise NumberingError("无法从文件名称生成两位备用文件简号")
-        raise NumberingError("文件名称可生成的两位备用文件简号均已被占用")
+
+        for abbreviation in abbreviations:
+            for function_code in self._function_code_candidates(
+                standard_name,
+                correction.function_code,
+                abbreviation.alias,
+            ):
+                generated = self._build_number(
+                    original_name=original_name,
+                    source_name=source_name,
+                    standard_name=standard_name,
+                    project_code=project_code,
+                    correction=correction,
+                    abbreviation=abbreviation,
+                    function_code=function_code,
+                )
+                if generated.final_code not in unavailable_final_codes:
+                    return generated
+
+        raise NumberingError("文件名称可用的两位功能码均已被占用")
 
     def _build_number(
         self,
@@ -147,21 +146,13 @@ class NumberingService:
         project_code: str,
         correction: NameCorrection,
         abbreviation: AbbreviationMatch,
+        function_code: str,
     ) -> GeneratedNumber:
-        is_software = (
-            "软件" in standard_name
-            or "软件" in source_name
-            or abbreviation.is_software
-        )
+        is_software = "软件" in standard_name or "软件" in source_name or abbreviation.is_software
         component_level = self._component_level(
             f"{standard_name}{source_name}",
             correction.component_level,
             is_software,
-        )
-        function_code = self._function_code(
-            standard_name,
-            correction.function_code,
-            abbreviation.alias,
         )
         stage, version = self._stage_and_version(standard_name)
         rule = get_rule_config()
@@ -178,13 +169,12 @@ class NumberingService:
             "G": stage,
             "H": version,
         }
-        base_code = (
-            rule.with_stage_format if stage else rule.without_stage_format
-        ).format(**values)
+        base_code = (rule.with_stage_format if stage else rule.without_stage_format).format(
+            **values
+        )
         prefixes: list[str] = []
-        if (
-            self._is_review_conclusion_report(standard_name)
-            or self._is_review_conclusion_report(source_name)
+        if self._is_review_conclusion_report(standard_name) or self._is_review_conclusion_report(
+            source_name
         ):
             prefixes.append("P")
         if is_software:
@@ -252,20 +242,16 @@ class NumberingService:
         match = MANUAL_CODE_PATTERN.fullmatch(normalized_code)
         if not match:
             raise NumberingError(
-                "完整编号格式不正确，例如 GH1234-3KZ-010JY-1.00 "
-                "或 R-GH1234-5KZ-010SCP-1.00"
+                "完整编号格式不正确，例如 GH1234-3KZ-010JY-1.00 或 R-GH1234-5KZ-010SCP-1.00"
             )
 
         values = match.groupdict(default="")
         if values["B"] != expected_project_code:
             raise NumberingError(
-                f"完整编号项目号 {values['B']} 与当前项目 "
-                f"{expected_project_code} 不一致"
+                f"完整编号项目号 {values['B']} 与当前项目 {expected_project_code} 不一致"
             )
 
-        is_review_conclusion_report = self._is_review_conclusion_report(
-            standard_name
-        )
+        is_review_conclusion_report = self._is_review_conclusion_report(standard_name)
         if is_review_conclusion_report and not values["P"]:
             raise NumberingError("评审结论报告的完整编号必须以 P- 开头")
         if values["P"] and not is_review_conclusion_report:
@@ -295,9 +281,7 @@ class NumberingService:
             is_software=bool(values["R"]),
         )
         if values["C"] != expected_level:
-            raise NumberingError(
-                f"完整编号的部组件级别应为 {expected_level}"
-            )
+            raise NumberingError(f"完整编号的部组件级别应为 {expected_level}")
 
         return GeneratedNumber(
             original_name=original_name,
@@ -362,6 +346,56 @@ class NumberingService:
         if not initials:
             raise NumberingError("无法从文件名称确定两位功能代码")
         return initials[:2].ljust(2, "X")
+
+    @classmethod
+    def _function_code_candidates(
+        cls,
+        file_name: str,
+        candidate: str | None,
+        abbreviation_alias: str,
+    ) -> tuple[str, ...]:
+        """按优先级产生功能码，并为重复编号提供稳定回退。
+
+        首选 AI/关键词判断结果；随后从名称的英文字母或汉字拼音
+        首字母中组合两位大写字母；最后使用文件名称作为种子遍历
+        其余两位大写字母，直到找到未占用的编号。
+        """
+        primary = cls._function_code(file_name, candidate, abbreviation_alias)
+        codes = [primary]
+        seen = {primary}
+
+        working = re.sub(r"^\d{4}", "", file_name).replace(abbreviation_alias, "")
+        name_letters: list[str] = []
+        for char in working:
+            if char.isascii() and char.isalpha():
+                name_letters.append(char.upper())
+            elif re.fullmatch(r"[\u4e00-\u9fff]", char):
+                initial = "".join(
+                    lazy_pinyin(char, style=Style.FIRST_LETTER, errors="ignore")
+                ).upper()
+                if re.fullmatch(r"[A-Z]", initial):
+                    name_letters.append(initial)
+
+        pairs = list(itertools.permutations(range(len(name_letters)), 2))
+        seed = int.from_bytes(hashlib.sha256(file_name.encode("utf-8")).digest()[:8], "big")
+        generator = random.Random(seed)
+        generator.shuffle(pairs)
+        for first, second in pairs:
+            code = name_letters[first] + name_letters[second]
+            if code in seen:
+                continue
+            seen.add(code)
+            codes.append(code)
+
+        remaining = [
+            first + second
+            for first in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            for second in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            if first + second not in seen
+        ]
+        generator.shuffle(remaining)
+        codes.extend(remaining)
+        return tuple(codes)
 
     @staticmethod
     def _stage_and_version(file_name: str) -> tuple[str, str]:

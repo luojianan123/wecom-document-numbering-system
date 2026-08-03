@@ -67,8 +67,7 @@ class CodeService:
         )
         if final_code_existing:
             raise CodeConflictError(
-                f"编码 {generated.final_code} 已被文件"
-                f"“{final_code_existing.standard_name}”占用"
+                f"编码 {generated.final_code} 已被文件“{final_code_existing.standard_name}”占用"
             )
         self.reserve_code(project.id, generated.final_code)
         record = self._to_record(generated, project, actor, source, enabled)
@@ -87,12 +86,8 @@ class CodeService:
             original_name,
             project.project_code,
         )
-        unavailable_final_codes = set(
-            self.db.scalars(select(CodeReservation.final_code))
-        )
-        unavailable_final_codes.update(
-            self.db.scalars(select(FileCode.final_code))
-        )
+        unavailable_final_codes = set(self.db.scalars(select(CodeReservation.final_code)))
+        unavailable_final_codes.update(self.db.scalars(select(FileCode.final_code)))
         generated = self.numbering.generate(
             original_name,
             correction,
@@ -112,9 +107,7 @@ class CodeService:
                 )
             reservation = self.db.get(CodeReservation, generated.final_code)
             if reservation:
-                raise CodeConflictError(
-                    f"编码 {generated.final_code} 已被全局占用"
-                )
+                raise CodeConflictError(f"编码 {generated.final_code} 已被全局占用")
 
         if check_existing:
             staged_items = self.db.scalars(
@@ -128,9 +121,7 @@ class CodeService:
                 if item.id == exclude_batch_item_id or not item.preview_data:
                     continue
                 if item.preview_data.get("standard_name") == generated.standard_name:
-                    raise CodeConflictError(
-                        f"文件“{generated.standard_name}”已在待确认列表中"
-                    )
+                    raise CodeConflictError(f"文件“{generated.standard_name}”已在待确认列表中")
         return generated
 
     async def stage_one(
@@ -251,16 +242,13 @@ class CodeService:
         )
         if final_code_existing:
             raise CodeConflictError(
-                f"编码 {generated.final_code} 已被文件"
-                f"“{final_code_existing.standard_name}”占用"
+                f"编码 {generated.final_code} 已被文件“{final_code_existing.standard_name}”占用"
             )
         reservation = self.db.get(CodeReservation, generated.final_code)
         if not reservation:
             self.reserve_code(project.id, generated.final_code)
         elif reservation.project_id != project.id:
-            raise CodeConflictError(
-                f"编码 {generated.final_code} 已被其他项目全局占用"
-            )
+            raise CodeConflictError(f"编码 {generated.final_code} 已被其他项目全局占用")
 
         record = self._to_record(
             generated,

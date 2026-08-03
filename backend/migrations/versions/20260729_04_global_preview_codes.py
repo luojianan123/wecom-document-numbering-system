@@ -37,11 +37,7 @@ def upgrade() -> None:
         preview_data = row["preview_data"]
         if isinstance(preview_data, str):
             preview_data = json.loads(preview_data)
-        final_code = (
-            preview_data.get("final_code")
-            if isinstance(preview_data, dict)
-            else None
-        )
+        final_code = preview_data.get("final_code") if isinstance(preview_data, dict) else None
         if final_code:
             connection.execute(
                 sa.update(batch_table)

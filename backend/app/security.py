@@ -88,8 +88,7 @@ def get_current_session(
     if manager.settings.wecom_auth_mode == "live":
         expected_role = (
             "admin"
-            if user.wecom_user_id.casefold()
-            in manager.settings.wecom_admin_user_id_set
+            if user.wecom_user_id.casefold() in manager.settings.wecom_admin_user_id_set
             else "user"
         )
         if user.role != expected_role:

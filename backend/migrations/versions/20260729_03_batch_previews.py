@@ -69,9 +69,7 @@ def upgrade() -> None:
             values["file_code_id"] = None
             draft_code_ids.append(row["file_code_id"])
         connection.execute(
-            sa.update(batch_table)
-            .where(batch_table.c.id == row["batch_id"])
-            .values(**values)
+            sa.update(batch_table).where(batch_table.c.id == row["batch_id"]).values(**values)
         )
 
     if draft_code_ids:
@@ -84,13 +82,9 @@ def upgrade() -> None:
             sa.column("id", sa.Integer()),
         )
         connection.execute(
-            sa.delete(claims_table).where(
-                claims_table.c.file_code_id.in_(draft_code_ids)
-            )
+            sa.delete(claims_table).where(claims_table.c.file_code_id.in_(draft_code_ids))
         )
-        connection.execute(
-            sa.delete(codes_table).where(codes_table.c.id.in_(draft_code_ids))
-        )
+        connection.execute(sa.delete(codes_table).where(codes_table.c.id.in_(draft_code_ids)))
 
 
 def downgrade() -> None:

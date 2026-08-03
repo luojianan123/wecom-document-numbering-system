@@ -23,6 +23,17 @@ export interface Project {
   created_at: string;
 }
 
+export interface ProjectNumberRequest {
+  id: number;
+  project_code: string;
+  requested_by_id: number;
+  requester_name: string;
+  requester_user_id: string;
+  status: "pending" | "processed";
+  created_at: string;
+  processed_at: string | null;
+}
+
 export interface FileCode {
   id: number;
   project_id: number;

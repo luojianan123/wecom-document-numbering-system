@@ -41,9 +41,7 @@ def issue_auth_state(
 
 
 def consume_auth_state(db: Session, state: str, purpose: str) -> str:
-    record = db.scalar(
-        select(AuthState).where(AuthState.state_hash == _hash_state(state))
-    )
+    record = db.scalar(select(AuthState).where(AuthState.state_hash == _hash_state(state)))
     if not record or record.purpose != purpose:
         raise AuthStateError("登录 state 无效")
     if record.used_at is not None:
@@ -56,4 +54,3 @@ def consume_auth_state(db: Session, state: str, purpose: str) -> str:
     record.used_at = datetime.now(UTC)
     db.commit()
     return record.return_path
-

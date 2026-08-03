@@ -16,8 +16,10 @@ import {
   importProjectCodes,
   initializeProject,
   listAdminNameReviews,
+  listAdminProjectNumberRequests,
   listProjects,
   manuallyNumberProjectBatchItem,
+  processAdminProjectNumberRequest,
   rejectAdminNameReview,
   retryProjectCode,
   setProjectSpecialNumbering
@@ -27,6 +29,7 @@ import type {
   BatchItem,
   NameReview,
   Project,
+  ProjectNumberRequest,
   ProjectInitResult
 } from "../types";
 
@@ -64,6 +67,9 @@ const reviewCodes = ref<Record<number, string>>({});
 const loadingReviews = ref(false);
 const processingReviewId = ref<number | null>(null);
 const updatingSpecialNumbering = ref(false);
+const projectNumberRequests = ref<ProjectNumberRequest[]>([]);
+const loadingProjectNumberRequests = ref(false);
+const processingProjectNumberRequestId = ref<number | null>(null);
 
 const filteredProjects = computed(() => {
   const query = projectNumberQuery.value.trim();
@@ -119,8 +125,43 @@ const canExport = computed(
 );
 
 onMounted(async () => {
-  await Promise.all([loadProjects(), loadNameReviews()]);
+  await Promise.all([
+    loadProjects(),
+    loadNameReviews(),
+    loadProjectNumberRequests()
+  ]);
 });
+
+async function loadProjectNumberRequests(): Promise<void> {
+  loadingProjectNumberRequests.value = true;
+  try {
+    projectNumberRequests.value = await listAdminProjectNumberRequests();
+  } catch (error) {
+    showError(error);
+  } finally {
+    loadingProjectNumberRequests.value = false;
+  }
+}
+
+function fillRequestedProjectCode(request: ProjectNumberRequest): void {
+  projectCode.value = request.project_code;
+  showToast("已填入项目号，请继续填写项目名称并上传清单");
+}
+
+async function processProjectNumberRequest(
+  request: ProjectNumberRequest
+): Promise<void> {
+  processingProjectNumberRequestId.value = request.id;
+  try {
+    await processAdminProjectNumberRequest(request.id);
+    await loadProjectNumberRequests();
+    showToast("已标记为已处理");
+  } catch (error) {
+    showError(error);
+  } finally {
+    processingProjectNumberRequestId.value = null;
+  }
+}
 
 async function loadProjects(): Promise<void> {
   try {
@@ -652,7 +693,7 @@ async function saveManualItem(index: number): Promise<void> {
     return;
   }
   if (!finalCode) {
-    showToast("请输入生成编码");
+    showToast("请输入文件编号");
     return;
   }
 
@@ -674,7 +715,7 @@ async function saveManualItem(index: number): Promise<void> {
     }
     showToast(
       wasSuccessful
-        ? "修正后文件名和编码已保存"
+        ? "修正后文件名和文件编号已保存"
         : "人工编号已加入待确认列表"
     );
   } catch (error) {
@@ -713,6 +754,60 @@ async function confirm(): Promise<void> {
           <p>清单只需“文件名称”列，文件名称前不要填写项目号。</p>
         </div>
         <div class="hero-rule">XLSX / CSV</div>
+      </section>
+
+      <section class="panel project-number-request-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">用户项目申请</p>
+            <h2>待处理新项目编号</h2>
+          </div>
+          <van-button
+            plain
+            size="small"
+            color="#17324d"
+            :loading="loadingProjectNumberRequests"
+            @click="loadProjectNumberRequests"
+          >
+            刷新
+          </van-button>
+        </div>
+        <div v-if="projectNumberRequests.length" class="project-number-request-list">
+          <article
+            v-for="request in projectNumberRequests"
+            :key="request.id"
+            class="project-number-request-item"
+          >
+            <div>
+              <strong>{{ request.project_code }}</strong>
+              <span>
+                {{ request.requester_name }}（{{ request.requester_user_id }}）
+              </span>
+              <small>{{ formatClaimTime(request.created_at) }}</small>
+            </div>
+            <div class="project-number-request-actions">
+              <van-button
+                plain
+                color="#176443"
+                @click="fillRequestedProjectCode(request)"
+              >
+                填入新项目表单
+              </van-button>
+              <van-button
+                color="#17324d"
+                :loading="processingProjectNumberRequestId === request.id"
+                @click="processProjectNumberRequest(request)"
+              >
+                标记已处理
+              </van-button>
+            </div>
+          </article>
+        </div>
+        <van-empty
+          v-else
+          image="search"
+          description="暂无新项目编号申请"
+        />
       </section>
 
       <section class="panel name-review-panel">
@@ -1195,7 +1290,7 @@ async function confirm(): Promise<void> {
                     <van-field
                       v-model="manualCodes[index]"
                       class="inline-code-field"
-                      placeholder="输入完整编号"
+                      placeholder="文件编号（任意格式）"
                       maxlength="64"
                       clearable
                     />

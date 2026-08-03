@@ -224,9 +224,7 @@ def test_generates_fallback_abbreviation_when_workbook_has_no_match(
     assert len(generated.segment_f) == 2
     assert generated.segment_f.isalpha()
     assert generated.segment_f.isupper()
-    assert generated.final_code == (
-        f"R-GH1234-5CC-010{generated.segment_f}-1.00"
-    )
+    assert generated.final_code == (f"R-GH1234-5CC-010{generated.segment_f}-1.00")
 
 
 def test_fallback_abbreviation_skips_an_occupied_final_code(
@@ -250,11 +248,12 @@ def test_fallback_abbreviation_skips_an_occupied_final_code(
         unavailable_final_codes={first.final_code},
     )
 
-    assert second.segment_f != first.segment_f
+    assert second.segment_f == first.segment_f
+    assert second.segment_d != first.segment_d
     assert second.final_code != first.final_code
 
 
-def test_workbook_abbreviation_collision_uses_fallback_code(
+def test_workbook_abbreviation_collision_keeps_file_code_and_changes_function(
     service: NumberingService,
 ) -> None:
     occupied = "GH1234-3KZ-010JY-1.00"
@@ -268,9 +267,37 @@ def test_workbook_abbreviation_collision_uses_fallback_code(
         unavailable_final_codes={occupied},
     )
 
-    assert generated.segment_f != "JY"
+    assert generated.segment_f == "JY"
+    assert generated.segment_d != "KZ"
     assert generated.final_code != occupied
-    assert generated.final_code.startswith("GH1234-3KZ-010")
+    assert generated.final_code.startswith(f"GH1234-3{generated.segment_d}-010JY")
+
+
+def test_design_report_always_uses_workbook_fb_on_collision(
+    service: NumberingService,
+) -> None:
+    first = service.generate(
+        "压缩存储单元方案设计报告",
+        NameCorrection(
+            standard_name="压缩存储单元方案设计报告",
+            function_code="CC",
+        ),
+        "1234",
+    )
+    second = service.generate(
+        "压缩存储单元方案设计报告",
+        NameCorrection(
+            standard_name="压缩存储单元方案设计报告",
+            function_code="CC",
+        ),
+        "1234",
+        unavailable_final_codes={first.final_code},
+    )
+
+    assert first.segment_f == "FB"
+    assert second.segment_f == "FB"
+    assert second.segment_d != first.segment_d
+    assert second.final_code != first.final_code
 
 
 def test_software_stage_keeps_r_prefix(service: NumberingService) -> None:

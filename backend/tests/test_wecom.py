@@ -27,9 +27,7 @@ def test_builds_enterprise_wecom_qr_url() -> None:
     assert parsed.netloc == "open.work.weixin.qq.com"
     assert query["appid"] == ["ww-corp-id"]
     assert query["agentid"] == ["1000002"]
-    assert query["redirect_uri"] == [
-        "https://codes.example.com/api/auth/wecom/qr/callback"
-    ]
+    assert query["redirect_uri"] == ["https://codes.example.com/api/auth/wecom/qr/callback"]
     assert query["state"] == ["one-time-state"]
 
 
@@ -196,9 +194,7 @@ def test_sends_wecom_text_application_message(
             return None
 
         async def get(self, *_: object, **__: object) -> FakeResponse:
-            return FakeResponse(
-                {"errcode": 0, "access_token": "token", "expires_in": 7200}
-            )
+            return FakeResponse({"errcode": 0, "access_token": "token", "expires_in": 7200})
 
         async def post(
             self,
