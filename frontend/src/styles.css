@@ -887,6 +887,7 @@ button {
 }
 
 .retry-button {
+  min-width: 104px;
   margin: 0;
 }
 
@@ -986,9 +987,22 @@ button {
   min-width: 60px;
 }
 
+.actions-column {
+  width: 344px;
+  min-width: 344px;
+}
+
 .row-actions {
   display: flex;
+  min-width: max-content;
+  align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
+}
+
+.row-actions .van-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .batch-selection-bar {
@@ -1033,7 +1047,7 @@ th,
 td {
   padding: 14px 12px;
   border-bottom: 1px solid var(--line);
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 th {
@@ -1468,5 +1482,15 @@ td code {
   th,
   td {
     min-width: 150px;
+  }
+
+  .selection-column {
+    width: 42px;
+    min-width: 42px;
+  }
+
+  .actions-column {
+    width: 344px;
+    min-width: 344px;
   }
 }

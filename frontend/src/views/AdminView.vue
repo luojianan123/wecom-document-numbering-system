@@ -1227,7 +1227,7 @@ async function confirm(): Promise<void> {
         </div>
 
         <div class="table-wrap">
-          <table>
+          <table class="batch-code-table">
             <thead>
               <tr>
                 <th class="selection-column">
@@ -1244,7 +1244,7 @@ async function confirm(): Promise<void> {
                 <th>生成编码</th>
                 <th>状态</th>
                 <th>领取记录</th>
-                <th>操作</th>
+                <th class="actions-column">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -1325,57 +1325,59 @@ async function confirm(): Promise<void> {
                   </div>
                   <span v-else class="claim-history-empty">尚未领取</span>
                 </td>
-                <td class="row-actions">
-                  <van-button
-                    v-if="
-                      !item.success &&
-                      ['draft', 'active'].includes(result.project.status)
-                    "
-                    class="retry-button"
-                    size="small"
-                    plain
-                    color="#b4532a"
-                    :loading="retryingIndex === index"
-                    @click="retryItem(index)"
-                  >
-                    修正并重试
-                  </van-button>
-                  <van-button
-                    v-if="
-                      item.id !== null &&
-                      item.file_code_id === null &&
-                      ['draft', 'active'].includes(result.project.status)
-                    "
-                    class="manual-row-button"
-                    size="small"
-                    plain
-                    color="#17324d"
-                    :loading="savingManualIndex === index"
-                    @click="saveManualItem(index)"
-                  >
-                    {{ item.success ? "保存修改" : "人工生成编号" }}
-                  </van-button>
-                  <van-button
-                    v-if="
-                      item.file_code_id !== null ||
-                      (item.id !== null &&
-                        ['draft', 'active'].includes(result.project.status))
-                    "
-                    class="delete-code-button"
-                    size="small"
-                    plain
-                    type="danger"
-                    :loading="
-                      (item.file_code_id !== null &&
-                        deletingFileCodeId === item.file_code_id) ||
-                      (item.file_code_id === null &&
+                <td class="actions-column">
+                  <div class="row-actions">
+                    <van-button
+                      v-if="
+                        !item.success &&
+                        ['draft', 'active'].includes(result.project.status)
+                      "
+                      class="retry-button"
+                      size="small"
+                      plain
+                      color="#b4532a"
+                      :loading="retryingIndex === index"
+                      @click="retryItem(index)"
+                    >
+                      修正并重试
+                    </van-button>
+                    <van-button
+                      v-if="
                         item.id !== null &&
-                        deletingBatchItemId === item.id)
-                    "
-                    @click="removeItem(item)"
-                  >
-                    删除
-                  </van-button>
+                        item.file_code_id === null &&
+                        ['draft', 'active'].includes(result.project.status)
+                      "
+                      class="manual-row-button"
+                      size="small"
+                      plain
+                      color="#17324d"
+                      :loading="savingManualIndex === index"
+                      @click="saveManualItem(index)"
+                    >
+                      {{ item.success ? "保存修改" : "人工生成编号" }}
+                    </van-button>
+                    <van-button
+                      v-if="
+                        item.file_code_id !== null ||
+                        (item.id !== null &&
+                          ['draft', 'active'].includes(result.project.status))
+                      "
+                      class="delete-code-button"
+                      size="small"
+                      plain
+                      type="danger"
+                      :loading="
+                        (item.file_code_id !== null &&
+                          deletingFileCodeId === item.file_code_id) ||
+                        (item.file_code_id === null &&
+                          item.id !== null &&
+                          deletingBatchItemId === item.id)
+                      "
+                      @click="removeItem(item)"
+                    >
+                      删除
+                    </van-button>
+                  </div>
                 </td>
               </tr>
             </tbody>
