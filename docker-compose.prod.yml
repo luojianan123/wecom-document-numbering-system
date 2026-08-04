@@ -10,7 +10,7 @@ services:
     logging: *prod-logging
     environment:
       ACME_CA: ${ACME_CA:-letsencrypt}
-      CERT_DOMAIN: ${CERT_DOMAIN:-pivot.ucas.com.cn}
+      CERT_DOMAIN: ${CERT_DOMAIN:-ljn.ucas.com.cn}
     entrypoint: ["/bin/sh", "/opt/filecode/acme-bootstrap.sh"]
     volumes:
       - acme_data:/acme.sh

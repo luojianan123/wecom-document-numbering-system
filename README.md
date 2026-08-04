@@ -63,11 +63,11 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 ```dotenv
 APP_ENV=production
-CERT_DOMAIN=pivot.ucas.com.cn
+CERT_DOMAIN=ljn.ucas.com.cn
 WEB_PORT=24088
-FRONTEND_URL=https://pivot.ucas.com.cn:24088
-BACKEND_PUBLIC_URL=https://pivot.ucas.com.cn:24088
-CORS_ORIGINS=https://pivot.ucas.com.cn:24088
+FRONTEND_URL=https://ljn.ucas.com.cn:24088
+BACKEND_PUBLIC_URL=https://ljn.ucas.com.cn:24088
+CORS_ORIGINS=https://ljn.ucas.com.cn:24088
 COOKIE_SECURE=true
 WECOM_AUTH_MODE=live
 ```
