@@ -482,7 +482,11 @@ button {
 }
 
 .project-request-button {
-  min-width: 164px;
+  width: max-content;
+  min-width: 0;
+  padding-right: 18px;
+  padding-left: 18px;
+  white-space: nowrap;
 }
 
 .project-picker-results {
@@ -987,16 +991,55 @@ button {
   min-width: 60px;
 }
 
+.batch-code-table {
+  table-layout: auto;
+}
+
+.batch-code-table .original-name-column {
+  width: 18%;
+  min-width: 150px;
+  overflow-wrap: anywhere;
+}
+
+.batch-code-table .standard-name-column {
+  width: 22%;
+  min-width: 180px;
+  overflow-wrap: anywhere;
+}
+
+.batch-code-table .generated-code-column {
+  width: 26%;
+  min-width: 220px;
+}
+
+.batch-code-table .status-column {
+  width: 1%;
+  min-width: 84px;
+  padding-right: 8px;
+  padding-left: 8px;
+  white-space: nowrap;
+}
+
+.batch-code-table .inline-correction,
+.batch-code-table .inline-code-editor {
+  width: 100%;
+  min-width: 0;
+}
+
 .actions-column {
-  width: 176px;
-  min-width: 176px;
+  width: 1%;
+  min-width: 120px;
+  padding-right: 6px;
+  padding-left: 6px;
   text-align: center;
+  white-space: nowrap;
 }
 
 .row-actions {
   display: flex;
-  width: 148px;
-  min-width: 148px;
+  width: max-content;
+  min-width: 104px;
+  max-width: 100%;
   margin: 0 auto;
   align-items: stretch;
   flex-direction: column;
@@ -1005,10 +1048,12 @@ button {
 }
 
 .row-actions .van-button {
-  width: 100%;
-  min-width: 0;
+  width: auto;
+  min-width: 104px;
   flex: 0 0 auto;
   margin: 0;
+  padding-right: 10px;
+  padding-left: 10px;
   white-space: nowrap;
 }
 
@@ -1074,7 +1119,10 @@ td code {
 }
 
 .claim-history-cell {
-  min-width: 190px;
+  width: 1%;
+  min-width: 108px;
+  padding-right: 8px;
+  padding-left: 8px;
 }
 
 .claim-history {
@@ -1497,7 +1545,7 @@ td code {
   }
 
   .actions-column {
-    width: 176px;
-    min-width: 176px;
+    width: 120px;
+    min-width: 120px;
   }
 }

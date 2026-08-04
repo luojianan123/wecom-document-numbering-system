@@ -1239,11 +1239,11 @@ async function confirm(): Promise<void> {
                     @update:model-value="setAllSelected"
                   />
                 </th>
-                <th>原文件名</th>
-                <th>修正后文件名</th>
-                <th>生成编码</th>
-                <th>状态</th>
-                <th>领取记录</th>
+                <th class="original-name-column">原文件名</th>
+                <th class="standard-name-column">修正后文件名</th>
+                <th class="generated-code-column">生成编码</th>
+                <th class="status-column">状态</th>
+                <th class="claim-history-cell">领取记录</th>
                 <th class="actions-column">操作</th>
               </tr>
             </thead>
@@ -1262,8 +1262,8 @@ async function confirm(): Promise<void> {
                     "
                   />
                 </td>
-                <td>{{ item.original_name }}</td>
-                <td>
+                <td class="original-name-column">{{ item.original_name }}</td>
+                <td class="standard-name-column">
                   <van-field
                     v-if="
                       ['draft', 'active'].includes(result.project.status) &&
@@ -1278,7 +1278,7 @@ async function confirm(): Promise<void> {
                   />
                   <span v-else>{{ item.standard_name ?? item.original_name }}</span>
                 </td>
-                <td>
+                <td class="generated-code-column">
                   <div
                     v-if="
                       ['draft', 'active'].includes(result.project.status) &&
@@ -1300,7 +1300,7 @@ async function confirm(): Promise<void> {
                   </div>
                   <code v-else>{{ item.final_code ?? item.error }}</code>
                 </td>
-                <td>
+                <td class="status-column">
                   <span
                     :class="[
                       'status-dot',
