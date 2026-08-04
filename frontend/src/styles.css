@@ -988,20 +988,27 @@ button {
 }
 
 .actions-column {
-  width: 344px;
-  min-width: 344px;
+  width: 176px;
+  min-width: 176px;
+  text-align: center;
 }
 
 .row-actions {
   display: flex;
-  min-width: max-content;
-  align-items: center;
+  width: 148px;
+  min-width: 148px;
+  margin: 0 auto;
+  align-items: stretch;
+  flex-direction: column;
   flex-wrap: nowrap;
   gap: 8px;
 }
 
 .row-actions .van-button {
+  width: 100%;
+  min-width: 0;
   flex: 0 0 auto;
+  margin: 0;
   white-space: nowrap;
 }
 
@@ -1490,7 +1497,7 @@ td code {
   }
 
   .actions-column {
-    width: 344px;
-    min-width: 344px;
+    width: 176px;
+    min-width: 176px;
   }
 }
