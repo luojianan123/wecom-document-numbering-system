@@ -67,10 +67,8 @@ async function mockLogin(role: Role): Promise<void> {
       <div class="brand-mark">
         <img :src="ucasLogo" alt="国科环宇 UCAS" />
       </div>
-      <h1 class="brand-title">项目文件编号系统</h1>
-      <p class="brand-statement">
-        让每个文件，<br />从创建起就有正确编号
-      </p>
+      <h1 class="brand-title">项目编号系统</h1>
+      <p class="brand-statement">统一文件与产品组件编码，实现全对象规范编号。</p>
       <div class="format-sample">
         <span>编号示例</span>
         <strong>GH1234-3KZ-010JY-1.00</strong>

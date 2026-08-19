@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..models import CodeReservation, FileCode, Project, ProjectBatchItem, User
 from ..schemas import BatchItemOut
 from .ai_names import NameCorrectionService
+from .name_validation import function_subject_key, normalized_standard_name
 from .numbering import GeneratedNumber, NumberingService
 
 
@@ -23,6 +24,52 @@ class CodeService:
         self.db = db
         self.numbering = numbering
         self.name_correction = name_correction
+
+    def required_function_code(
+        self,
+        project_id: int,
+        standard_name: str,
+        *,
+        exclude_batch_item_id: int | None = None,
+    ) -> str | None:
+        subject_key = function_subject_key(standard_name, self.numbering.abbreviations)
+        if not subject_key:
+            return None
+        normalized_name = normalized_standard_name(standard_name)
+
+        function_codes = {
+            item.segment_d
+            for item in self.db.scalars(
+                select(FileCode).where(FileCode.project_id == project_id)
+            )
+            if item.segment_d
+            and normalized_standard_name(item.standard_name) != normalized_name
+            and function_subject_key(item.standard_name, self.numbering.abbreviations)
+            == subject_key
+        }
+        staged_items = self.db.scalars(
+            select(ProjectBatchItem).where(
+                ProjectBatchItem.project_id == project_id,
+                ProjectBatchItem.success.is_(True),
+                ProjectBatchItem.file_code_id.is_(None),
+            )
+        )
+        for item in staged_items:
+            if item.id == exclude_batch_item_id or not item.preview_data:
+                continue
+            preview_name = str(item.preview_data.get("standard_name", ""))
+            preview_function_code = str(item.preview_data.get("segment_d", ""))
+            if (
+                preview_function_code
+                and normalized_standard_name(preview_name) != normalized_name
+                and function_subject_key(preview_name, self.numbering.abbreviations) == subject_key
+            ):
+                function_codes.add(preview_function_code)
+
+        if len(function_codes) > 1:
+            codes = "、".join(sorted(function_codes))
+            raise CodeConflictError(f"同一软件、板卡或产品存在多个历史功能码：{codes}")
+        return next(iter(function_codes), None)
 
     async def generate_one(
         self,
@@ -86,6 +133,11 @@ class CodeService:
             original_name,
             project.project_code,
         )
+        required_function_code = self.required_function_code(
+            project.id,
+            correction.standard_name,
+            exclude_batch_item_id=exclude_batch_item_id,
+        )
         unavailable_final_codes = set(self.db.scalars(select(CodeReservation.final_code)))
         unavailable_final_codes.update(self.db.scalars(select(FileCode.final_code)))
         generated = self.numbering.generate(
@@ -93,6 +145,7 @@ class CodeService:
             correction,
             project.project_code,
             unavailable_final_codes=unavailable_final_codes,
+            required_function_code=required_function_code,
         )
         if check_existing:
             existing = self.db.scalar(

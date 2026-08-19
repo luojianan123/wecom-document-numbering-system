@@ -374,11 +374,16 @@ async def generate_missing_code(
 
         unavailable_final_codes = set(db.scalars(select(FileCode.final_code)))
         unavailable_final_codes.update(db.scalars(select(CodeReservation.final_code)))
+        required_function_code = service.required_function_code(
+            project.id,
+            candidate_name,
+        )
         generated = service.numbering.generate(
             submitted_name,
             correction,
             project.project_code,
             unavailable_final_codes=unavailable_final_codes,
+            required_function_code=required_function_code,
         )
         project = db.scalar(
             select(Project)

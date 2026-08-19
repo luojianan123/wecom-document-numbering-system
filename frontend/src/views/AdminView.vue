@@ -655,12 +655,16 @@ async function retryItem(index: number): Promise<void> {
       fileName
     );
     result.value.items[index] = updated;
+    if (updated.success) {
+      manualNames.value[index] = updated.standard_name ?? fileName;
+      manualCodes.value[index] = updated.final_code ?? "";
+    }
     if (!previous.success && updated.success) {
       result.value.success_count += 1;
       result.value.failure_count -= 1;
-      showToast("修正成功，已重新生成编码");
+      showToast("修正成功，编号已生成，请核对后点击保存");
     } else if (updated.success) {
-      showToast("编码已重新生成");
+      showToast("编号已生成，请核对后点击保存");
     } else {
       showToast(updated.error ?? "修正后仍无法生成编码");
     }
@@ -713,9 +717,9 @@ async function saveManualItem(index: number): Promise<void> {
       result.value.success_count += 1;
       result.value.failure_count -= 1;
     }
-    showToast(
-      wasSuccessful
-        ? "修正后文件名和文件编号已保存"
+      showToast(
+        wasSuccessful
+        ? "修正后文件名和文件编号已保存到待确认列表"
         : "人工编号已加入待确认列表"
     );
   } catch (error) {
@@ -1354,7 +1358,7 @@ async function confirm(): Promise<void> {
                       :loading="savingManualIndex === index"
                       @click="saveManualItem(index)"
                     >
-                      {{ item.success ? "保存修改" : "人工生成编号" }}
+                      {{ item.success ? "保存" : "人工生成编号" }}
                     </van-button>
                     <van-button
                       v-if="

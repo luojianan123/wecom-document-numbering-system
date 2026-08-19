@@ -273,6 +273,35 @@ def test_workbook_abbreviation_collision_keeps_file_code_and_changes_function(
     assert generated.final_code.startswith(f"GH1234-3{generated.segment_d}-010JY")
 
 
+def test_existing_subject_function_code_overrides_ai_candidate(
+    service: NumberingService,
+) -> None:
+    generated = service.generate(
+        "飞鹰主控板使用说明书",
+        NameCorrection(
+            standard_name="飞鹰主控板使用说明书",
+            function_code="SS",
+        ),
+        "1234",
+        required_function_code="FY",
+    )
+
+    assert generated.segment_d == "FY"
+    assert generated.final_code == "GH1234-5FY-010SS-1.00"
+
+
+def test_manual_code_must_keep_existing_subject_function_code(
+    service: NumberingService,
+) -> None:
+    with pytest.raises(NumberingError, match="功能码必须保持为 FY"):
+        service.parse_manual_code(
+            "飞鹰主控板使用说明书",
+            "GH1234-5SS-010SS-1.00",
+            "1234",
+            required_function_code="FY",
+        )
+
+
 def test_design_report_always_uses_workbook_fb_on_collision(
     service: NumberingService,
 ) -> None:

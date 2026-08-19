@@ -4,6 +4,7 @@ from app.services.abbreviations import AbbreviationRegistry
 from app.services.name_validation import (
     extract_product_subject,
     find_similar_names,
+    function_subject_key,
     is_obviously_unrelated_name,
 )
 
@@ -52,28 +53,45 @@ def test_detects_only_obvious_life_or_personal_expressions() -> None:
     )
 
 
-def test_similarity_requires_the_same_board_or_component_subject() -> None:
+def test_similarity_requires_matching_file_abbreviation_and_subject() -> None:
     registry = AbbreviationRegistry(ROOT / "文件简号.xlsx")
 
-    assert (
-        find_similar_names(
-            "主控板原理图",
-            ["接口板原理图", "电源板原理图", "通信模块原理图"],
-            registry,
-        )
-        == []
-    )
     assert [
         item.standard_name
         for item in find_similar_names(
             "主控板原理图",
             [
-                "机载任务智能处理机S5000C主控板原理图",
+                "接口板原理图",
+                "主控板装配图",
                 "备用主控板原理图",
             ],
             registry,
         )
     ] == [
         "备用主控板原理图",
-        "机载任务智能处理机S5000C主控板原理图",
     ]
+
+    assert (
+        find_similar_names(
+            "主控软件测试报告",
+            ["主控软件测试计划", "主控软件源代码"],
+            registry,
+        )
+        == []
+    )
+
+
+def test_similarity_skips_names_without_a_known_file_abbreviation() -> None:
+    registry = AbbreviationRegistry(ROOT / "文件简号.xlsx")
+
+    assert find_similar_names("主控板临时材料", ["接口板临时材料"], registry) == []
+
+
+def test_function_subject_key_keeps_software_boards_and_products_separate() -> None:
+    registry = AbbreviationRegistry(ROOT / "文件简号.xlsx")
+
+    assert function_subject_key("猎鹰软件测试报告", registry) == "software:猎鹰"
+    assert function_subject_key("猎鹰软件使用说明书", registry) == "software:猎鹰"
+    assert function_subject_key("飞鹰主控板测试报告", registry) == "board:飞鹰主控"
+    assert function_subject_key("飞鹰主控板使用说明书", registry) == "board:飞鹰主控"
+    assert function_subject_key("飞鹰产品测试报告", registry) == "product:飞鹰"

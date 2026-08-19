@@ -49,7 +49,7 @@ from ..services.name_validation import (
     validate_user_file_name,
 )
 from ..services.notifications import notify_review_approved
-from ..services.numbering import GeneratedNumber, NumberingService
+from ..services.numbering import GeneratedNumber, NumberingService, extract_function_code
 from ..services.uploads import UploadError, parse_file_names
 
 router = APIRouter(prefix="/api/admin", tags=["管理员"])
@@ -696,6 +696,10 @@ def add_manual_project_code(
             payload.file_name,
             payload.final_code,
             project.project_code,
+            required_function_code=service.required_function_code(
+                project.id,
+                payload.file_name,
+            ),
         )
         existing = db.scalar(
             select(FileCode).where(
@@ -1110,6 +1114,17 @@ def manually_number_batch_item(
         final_code = payload.final_code.strip()
         if not final_code:
             raise ValueError("文件编号不能为空")
+        required_function_code = service.required_function_code(
+            project.id,
+            standard_name,
+            exclude_batch_item_id=batch_item.id,
+        )
+        if required_function_code:
+            edited_function_code = extract_function_code(final_code)
+            if edited_function_code and edited_function_code != required_function_code:
+                raise ValueError(
+                    f"同一软件、板卡或产品的功能码必须保持为 {required_function_code}"
+                )
 
         preview_data = dict(batch_item.preview_data or {})
         generated = GeneratedNumber(

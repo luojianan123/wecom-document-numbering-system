@@ -311,7 +311,7 @@ def test_personal_judgement_or_person_name_document_requires_review(
     assert "疑似非工程内容" in submitted.json()["message"]
 
 
-def test_different_board_with_same_document_type_is_generated_without_review(
+def test_similar_board_with_same_file_abbreviation_requires_review(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -349,15 +349,145 @@ def test_different_board_with_same_document_type_is_generated_without_review(
     user_csrf = login(client, "user")
     generated = client.post(
         "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "备用主控板原理图"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert generated.status_code == 200, generated.text
+    assert generated.json()["status"] == "pending_review"
+    assert generated.json()["file_code"] is None
+    assert generated.json()["review"]["similar_names"][0]["standard_name"] == "主控板原理图"
+    assert len(admin_notifications) == 1
+
+
+def test_different_board_with_same_file_abbreviation_is_generated_without_review(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin_notifications: list[dict[str, object]] = []
+
+    async def fake_admin_notification(**payload: object) -> None:
+        admin_notifications.append(payload)
+
+    monkeypatch.setattr(
+        "app.api.codes.notify_admin_review_requested",
+        fake_admin_notification,
+    )
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={"project_name": "同简号不同部件项目", "project_code": "1241"},
+        files={
+            "file": (
+                "files.csv",
+                "文件名称\n主控板原理图\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    project_id = initialized.json()["project"]["id"]
+    client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).raise_for_status()
+
+    user_csrf = login(client, "user")
+    generated = client.post(
+        "/api/codes/generate",
         json={"project_id": project_id, "file_name": "接口板原理图"},
         headers={"X-CSRF-Token": user_csrf},
     )
     assert generated.status_code == 200, generated.text
     assert generated.json()["status"] == "generated"
-    assert generated.json()["file_code"]["standard_name"] == "接口板原理图"
-    assert generated.json()["file_code"]["final_code"].startswith("GH1239-5JK-")
     assert generated.json()["review"] is None
     assert admin_notifications == []
+
+
+def test_same_board_with_different_file_abbreviation_is_generated_without_review(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin_notifications: list[dict[str, object]] = []
+
+    async def fake_admin_notification(**payload: object) -> None:
+        admin_notifications.append(payload)
+
+    monkeypatch.setattr(
+        "app.api.codes.notify_admin_review_requested",
+        fake_admin_notification,
+    )
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={"project_name": "简号相似规则项目", "project_code": "1240"},
+        files={
+            "file": (
+                "files.csv",
+                "文件名称\n主控板原理图\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    project_id = initialized.json()["project"]["id"]
+    client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).raise_for_status()
+
+    user_csrf = login(client, "user")
+    generated = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "主控板装配图"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert generated.status_code == 200, generated.text
+    assert generated.json()["status"] == "generated"
+    assert generated.json()["file_code"]["standard_name"] == "主控板装配图"
+    assert generated.json()["review"] is None
+    assert admin_notifications == []
+
+
+def test_same_board_reuses_existing_function_code(client: TestClient) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={"project_name": "功能码一致性项目", "project_code": "1242"},
+        files={
+            "file": (
+                "files.csv",
+                "文件名称\n飞鹰主控板技术要求\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert initialized.status_code == 200, initialized.text
+    project_id = initialized.json()["project"]["id"]
+    client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).raise_for_status()
+
+    user_csrf = login(client, "user")
+    generated = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "飞鹰主控板使用说明书"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert generated.status_code == 200, generated.text
+    assert generated.json()["status"] == "generated"
+
+    with SessionLocal() as db:
+        records = list(
+            db.scalars(
+                select(FileCode)
+                .where(FileCode.project_id == project_id)
+                .order_by(FileCode.id)
+            )
+        )
+        assert len(records) == 2
+        assert records[0].segment_d == records[1].segment_d
 
 
 @pytest.mark.parametrize(

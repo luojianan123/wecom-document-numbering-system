@@ -299,11 +299,41 @@ button {
   align-items: flex-start;
   padding: 30px;
   border: 1px solid var(--line);
-  border-radius: 3px 20px 3px 20px;
+  border-radius: 6px;
   color: var(--ink);
   background: #f7f9f7;
   text-align: left;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.view-choice-card:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.view-choice-card:disabled:hover {
+  transform: none;
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.view-choice-card.file-code-choice {
+  color: white;
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.file-code-choice .view-choice-index {
+  color: #78391f;
+  background: #f0cdb8;
+}
+
+.file-code-choice p {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.file-code-choice small {
+  color: #a8d6c2;
 }
 
 .view-choice-card:hover,

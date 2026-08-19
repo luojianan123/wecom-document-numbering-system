@@ -17,3 +17,5 @@ backend/.venv/
 backend/.venv-win/
 frontend/node_modules/
 coverage/
+
+*.log

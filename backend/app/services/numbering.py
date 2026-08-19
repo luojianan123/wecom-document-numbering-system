@@ -68,6 +68,13 @@ MANUAL_CODE_PATTERN = re.compile(
     r"010(?P<F>[A-Z0-9]{1,12})"
     r"(?:-(?P<G>[ZC]))?-(?P<H>1\.00|2\.00)$"
 )
+
+
+def extract_function_code(final_code: str) -> str | None:
+    match = MANUAL_CODE_PATTERN.fullmatch(
+        unicodedata.normalize("NFKC", final_code).strip().upper()
+    )
+    return match.group("D") if match else None
 REVIEW_CONCLUSION_REPORT = "评审结论报告"
 
 
@@ -81,6 +88,7 @@ class NumberingService:
         correction: NameCorrection,
         expected_project_code: str | None = None,
         unavailable_final_codes: Collection[str] = (),
+        required_function_code: str | None = None,
     ) -> GeneratedNumber:
         standard_name = standardize_document_terms(
             unicodedata.normalize("NFKC", correction.standard_name).strip()
@@ -118,11 +126,16 @@ class NumberingService:
             raise NumberingError("无法从文件名称生成两位备用文件简号")
 
         for abbreviation in abbreviations:
-            for function_code in self._function_code_candidates(
-                standard_name,
-                correction.function_code,
-                abbreviation.alias,
-            ):
+            function_codes = (
+                (required_function_code,)
+                if required_function_code is not None
+                else self._function_code_candidates(
+                    standard_name,
+                    correction.function_code,
+                    abbreviation.alias,
+                )
+            )
+            for function_code in function_codes:
                 generated = self._build_number(
                     original_name=original_name,
                     source_name=source_name,
@@ -135,6 +148,10 @@ class NumberingService:
                 if generated.final_code not in unavailable_final_codes:
                     return generated
 
+        if required_function_code is not None:
+            raise NumberingError(
+                f"同一软件、板卡或产品必须保持功能码 {required_function_code}，但该编号已被占用"
+            )
         raise NumberingError("文件名称可用的两位功能码均已被占用")
 
     def _build_number(
@@ -230,6 +247,7 @@ class NumberingService:
         original_name: str,
         final_code: str,
         expected_project_code: str,
+        required_function_code: str | None = None,
     ) -> GeneratedNumber:
         source_name = normalize_file_name(original_name)
         standard_name = standardize_document_terms(source_name)
@@ -282,6 +300,10 @@ class NumberingService:
         )
         if values["C"] != expected_level:
             raise NumberingError(f"完整编号的部组件级别应为 {expected_level}")
+        if required_function_code is not None and values["D"] != required_function_code:
+            raise NumberingError(
+                f"同一软件、板卡或产品的功能码必须保持为 {required_function_code}"
+            )
 
         return GeneratedNumber(
             original_name=original_name,

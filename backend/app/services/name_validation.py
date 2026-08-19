@@ -223,6 +223,32 @@ def extract_product_subject(
     return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", subject.casefold())
 
 
+def function_subject_key(
+    value: str,
+    abbreviations: AbbreviationRegistry,
+) -> str:
+    normalized = standardize_document_terms(normalize_file_name(value))
+    try:
+        abbreviation = abbreviations.match(normalized)
+    except AbbreviationError:
+        abbreviation = None
+
+    if "软件" in normalized or bool(abbreviation and abbreviation.is_software):
+        subject_type = "software"
+        suffixes = ("软件", "程序")
+    elif re.search(r"(?:板卡|电路板|板|pcb|pcba)", normalized, re.IGNORECASE):
+        subject_type = "board"
+        suffixes = ("板卡", "电路板", "板", "pcb", "pcba")
+    else:
+        subject_type = "product"
+        suffixes = ()
+
+    subject = extract_product_subject(normalized, abbreviations)
+    for suffix in suffixes:
+        subject = re.sub(rf"{re.escape(suffix)}$", "", subject, flags=re.IGNORECASE)
+    return f"{subject_type}:{subject}" if subject else ""
+
+
 def is_obviously_unrelated_name(
     candidate: str,
     abbreviations: AbbreviationRegistry,
@@ -290,11 +316,22 @@ def find_similar_names(
     limit: int = 5,
 ) -> list[SimilarName]:
     normalized_candidate = normalized_standard_name(candidate)
+    try:
+        candidate_abbreviation = abbreviations.match(candidate)
+    except AbbreviationError:
+        return []
     candidate_subject = extract_product_subject(candidate, abbreviations)
+
     matches: list[SimilarName] = []
     for existing_name in existing_names:
         normalized_existing = normalized_standard_name(existing_name)
         if normalized_existing == normalized_candidate:
+            continue
+        try:
+            existing_abbreviation = abbreviations.match(existing_name)
+        except AbbreviationError:
+            continue
+        if existing_abbreviation.code != candidate_abbreviation.code:
             continue
         existing_subject = extract_product_subject(existing_name, abbreviations)
         subject_score = SequenceMatcher(
@@ -311,19 +348,5 @@ def find_similar_names(
         )
         if subject_score < 0.72 and not subject_is_contained:
             continue
-        score = SequenceMatcher(
-            None,
-            normalized_candidate,
-            normalized_existing,
-        ).ratio()
-        shorter_length = min(
-            len(normalized_candidate),
-            len(normalized_existing),
-        )
-        is_contained = shorter_length >= 4 and (
-            normalized_candidate in normalized_existing
-            or normalized_existing in normalized_candidate
-        )
-        if score >= 0.72 or is_contained:
-            matches.append(SimilarName(existing_name, round(score, 3)))
+        matches.append(SimilarName(existing_name, 1.0))
     return sorted(matches, key=lambda item: item.score, reverse=True)[:limit]
