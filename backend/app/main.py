@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from .api import admin, auth, codes
+from .api import admin, auth, codes, product_components
 from .config import get_settings
 from .db import Base, engine
 from .services.abbreviations import get_abbreviation_registry
@@ -42,6 +42,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(codes.router)
+app.include_router(product_components.router)
 
 
 @app.get("/api/health")

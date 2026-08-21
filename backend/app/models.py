@@ -230,6 +230,62 @@ class ProjectNumberRequest(Base):
     processor: Mapped[User | None] = relationship(foreign_keys=[processed_by_id])
 
 
+class ComponentProject(Base):
+    __tablename__ = "component_projects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_code: Mapped[str] = mapped_column(String(4), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    nodes: Mapped[list["ComponentNode"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+
+
+class ComponentNode(Base):
+    __tablename__ = "component_nodes"
+    __table_args__ = (
+        UniqueConstraint("component_project_id", "code", name="uq_component_nodes_code"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    component_project_id: Mapped[int] = mapped_column(
+        ForeignKey("component_projects.id"), index=True
+    )
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("component_nodes.id"), nullable=True
+    )
+    kind: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(256))
+    code: Mapped[str] = mapped_column(String(128))
+    stage: Mapped[str] = mapped_column(String(1))
+    sequence: Mapped[int] = mapped_column()
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    project: Mapped[ComponentProject] = relationship(back_populates="nodes")
+    parent: Mapped["ComponentNode | None"] = relationship(remote_side="ComponentNode.id")
+    claims: Mapped[list["ComponentClaim"]] = relationship(
+        back_populates="node", cascade="all, delete-orphan"
+    )
+
+
+class ComponentClaim(Base):
+    __tablename__ = "component_claims"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    component_node_id: Mapped[int] = mapped_column(
+        ForeignKey("component_nodes.id"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    claimant_name: Mapped[str] = mapped_column(String(128))
+    claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    node: Mapped[ComponentNode] = relationship(back_populates="claims")
+
+
 class AuthState(Base):
     __tablename__ = "auth_states"
 

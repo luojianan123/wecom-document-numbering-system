@@ -165,3 +165,70 @@ class ClaimOut(BaseModel):
     file_code: FileCodeOut
     claimant_name: str
     claimed_at: datetime
+
+
+class ComponentClaimOut(BaseModel):
+    id: int
+    claimant_name: str
+    claimed_at: datetime
+
+
+class ComponentNodeOut(BaseModel):
+    id: int
+    component_project_id: int
+    parent_id: int | None
+    kind: str
+    name: str
+    code: str
+    stage: str
+    sequence: int
+    claims: list[ComponentClaimOut] = Field(default_factory=list)
+
+
+class ComponentProjectOut(BaseModel):
+    id: int
+    project_code: str
+    status: str
+    created_at: datetime
+    nodes: list[ComponentNodeOut] = Field(default_factory=list)
+
+
+class ComponentProjectCreateIn(BaseModel):
+    project_code: str = Field(pattern=r"^\d{4}$")
+    machine_name: str = Field(min_length=1, max_length=256)
+    is_prototype: bool = False
+
+
+class ComponentMachineCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=256)
+    is_prototype: bool = False
+
+
+class ComponentNodeCreateIn(BaseModel):
+    parent_id: int
+    kind: Literal["component", "structure", "hardware", "software", "other", "part"]
+    name: str = Field(min_length=1, max_length=256)
+    is_prototype: bool = False
+
+
+class ComponentNodeUpdateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=256)
+    code: str = Field(min_length=1, max_length=128)
+
+
+class ComponentBulkDeleteIn(BaseModel):
+    node_ids: list[int] = Field(min_length=1, max_length=2_000)
+
+
+class ComponentDraftNodeIn(BaseModel):
+    client_id: str = Field(min_length=1, max_length=64)
+    parent_id: int | None = None
+    parent_client_id: str | None = Field(default=None, min_length=1, max_length=64)
+    kind: Literal["machine", "component", "structure", "hardware", "software", "other", "part"]
+    name: str = Field(min_length=1, max_length=256)
+    is_prototype: bool = False
+
+
+class ComponentTreeGenerateIn(BaseModel):
+    project_code: str = Field(pattern=r"^\d{4}$")
+    nodes: list[ComponentDraftNodeIn] = Field(min_length=1, max_length=2_000)

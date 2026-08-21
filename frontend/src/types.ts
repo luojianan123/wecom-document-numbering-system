@@ -104,3 +104,48 @@ export interface ProjectInitResult {
   success_count: number;
   failure_count: number;
 }
+
+
+export interface ComponentClaim {
+  id: number;
+  claimant_name: string;
+  claimed_at: string;
+}
+
+export type ComponentKind =
+  | "machine"
+  | "component"
+  | "structure"
+  | "hardware"
+  | "software"
+  | "other"
+  | "part";
+
+export interface ComponentNode {
+  id: number;
+  component_project_id: number;
+  parent_id: number | null;
+  kind: ComponentKind;
+  name: string;
+  code: string;
+  stage: "G" | "Z";
+  sequence: number;
+  claims: ComponentClaim[];
+}
+
+export interface ComponentProject {
+  id: number;
+  project_code: string;
+  status: string;
+  created_at: string;
+  nodes: ComponentNode[];
+}
+
+export interface ComponentDraftNode {
+  client_id: string;
+  parent_id: number | null;
+  parent_client_id: string | null;
+  kind: ComponentKind;
+  name: string;
+  is_prototype: boolean;
+}

@@ -22,12 +22,12 @@ const router = useRouter();
           <button
             type="button"
             class="view-choice-card product-code-choice"
-            disabled
+            @click="router.push('/user/components')"
           >
             <span class="view-choice-index">01</span>
             <strong>产品组件编码</strong>
             <p>产品、板卡、软件及其他组件编码。</p>
-            <small>待设计</small>
+            <small>进入产品组件编码 →</small>
           </button>
 
           <button

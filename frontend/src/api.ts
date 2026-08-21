@@ -1,5 +1,10 @@
 import type {
   BatchItem,
+  ComponentClaim,
+  ComponentDraftNode,
+  ComponentKind,
+  ComponentNode,
+  ComponentProject,
   ClaimRecord,
   FileCode,
   GenerateCodeResult,
@@ -359,4 +364,114 @@ export function rejectAdminNameReview(
       body: JSON.stringify({ reason })
     }
   );
+}
+
+
+export function getComponentProject(projectCode: string): Promise<ComponentProject> {
+  return request<ComponentProject>(`/api/component-codes/projects/${projectCode}`);
+}
+
+export function createComponentProject(
+  projectCode: string,
+  machineName: string,
+  isPrototype: boolean
+): Promise<ComponentProject> {
+  return request<ComponentProject>("/api/component-codes/projects", {
+    method: "POST",
+    body: JSON.stringify({
+      project_code: projectCode,
+      machine_name: machineName,
+      is_prototype: isPrototype
+    })
+  });
+}
+
+export function generateComponentTree(
+  projectCode: string,
+  nodes: ComponentDraftNode[]
+): Promise<ComponentProject> {
+  return request<ComponentProject>("/api/component-codes/projects/tree/generate", {
+    method: "POST",
+    body: JSON.stringify({ project_code: projectCode, nodes })
+  });
+}
+
+export function addComponentMachine(
+  projectId: number,
+  name: string,
+  isPrototype: boolean
+): Promise<ComponentNode> {
+  return request<ComponentNode>(
+    `/api/component-codes/projects/${projectId}/machines`,
+    {
+      method: "POST",
+      body: JSON.stringify({ name, is_prototype: isPrototype })
+    }
+  );
+}
+
+export function addComponentNode(
+  projectId: number,
+  parentId: number,
+  kind: ComponentKind,
+  name: string,
+  isPrototype: boolean
+): Promise<ComponentNode> {
+  return request<ComponentNode>(
+    `/api/component-codes/projects/${projectId}/nodes`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        parent_id: parentId,
+        kind,
+        name,
+        is_prototype: isPrototype
+      })
+    }
+  );
+}
+
+export function updateComponentNode(
+  projectId: number,
+  nodeId: number,
+  name: string,
+  code: string
+): Promise<ComponentNode> {
+  return request<ComponentNode>(
+    `/api/component-codes/projects/${projectId}/nodes/${nodeId}`,
+    { method: "POST", body: JSON.stringify({ name, code }) }
+  );
+}
+
+export function deleteComponentNodes(
+  projectId: number,
+  nodeIds: number[]
+): Promise<void> {
+  return request<void>(`/api/component-codes/projects/${projectId}/bulk-delete`, {
+    method: "POST",
+    body: JSON.stringify({ node_ids: nodeIds })
+  });
+}
+
+export function renumberComponentProject(
+  projectId: number
+): Promise<ComponentProject> {
+  return request<ComponentProject>(
+    `/api/component-codes/projects/${projectId}/renumber`,
+    { method: "POST" }
+  );
+}
+
+export function claimComponentNode(nodeId: number): Promise<ComponentClaim> {
+  return request<ComponentClaim>(`/api/component-codes/nodes/${nodeId}/claim`, {
+    method: "POST"
+  });
+}
+
+export async function exportComponentProject(projectId: number): Promise<Blob> {
+  const response = await fetch(`/api/component-codes/projects/${projectId}/export`, {
+    credentials: "include"
+  });
+  if (!response.ok) throw new ApiError(response.status, "产品组件编码导出失败");
+  return response.blob();
 }
