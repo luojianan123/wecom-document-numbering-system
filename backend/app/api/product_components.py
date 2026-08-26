@@ -20,14 +20,16 @@ from ..schemas import (
     ComponentNodeUpdateIn,
     ComponentProjectCreateIn,
     ComponentProjectOut,
+    ComponentProjectSummaryOut,
     ComponentTreeGenerateIn,
 )
-from ..security import CurrentSession, require_csrf, require_user
+from ..security import CurrentSession, require_admin, require_csrf, require_user
 from ..services.product_components import (
     ComponentNumberingError,
     build_child_code,
     build_machine_code,
     kind_label,
+    rebuild_code_suffix,
     sequence_start,
     stage_code,
     validate_node_code,
@@ -46,6 +48,7 @@ def _node_out(node: ComponentNode) -> ComponentNodeOut:
         code=node.code,
         stage=node.stage,
         sequence=node.sequence,
+        created_by_name=node.created_by.name if node.created_by else "未知用户",
         claims=[
             ComponentClaimOut(
                 id=claim.id,
@@ -70,6 +73,7 @@ def _project_out(db: Session, project: ComponentProject) -> ComponentProjectOut:
         project_code=project.project_code,
         status=project.status,
         created_at=project.created_at,
+        created_by_name=project.created_by.name if project.created_by else "未知用户",
         nodes=[_node_out(node) for node in nodes],
     )
 
@@ -198,17 +202,52 @@ def _renumber_tree(db: Session, machines: list[ComponentNode]) -> None:
     changed: list[ComponentNode] = []
     for machine in machines:
         changed.extend(_renumber_descendants(db, machine))
-    if not changed:
+    if not machines:
         return
     # Use temporary unique codes first.  This makes a swap/reorder safe even
     # when the database enforces uniqueness on the code column.
     for index, node in enumerate(changed):
         node.code = f"__renumbering_{node.id}_{index}"
     db.flush()
+    for machine in machines:
+        machine.code = rebuild_code_suffix(machine)
     for node in changed:
-        if node.parent is None:
-            continue
         node.code = build_child_code(node.parent, node.kind, node.sequence, node.stage)
+
+
+@router.get(
+    "/projects/admin/list",
+    response_model=list[ComponentProjectSummaryOut],
+)
+def list_admin_projects(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[ComponentProjectSummaryOut]:
+    projects = list(
+        db.scalars(select(ComponentProject).order_by(ComponentProject.created_at.desc()))
+    )
+    result: list[ComponentProjectSummaryOut] = []
+    for project in projects:
+        nodes = list(
+            db.scalars(
+                select(ComponentNode).where(
+                    ComponentNode.component_project_id == project.id
+                )
+            )
+        )
+        result.append(
+            ComponentProjectSummaryOut(
+                id=project.id,
+                project_code=project.project_code,
+                status=project.status,
+                created_at=project.created_at,
+                created_by_name=project.created_by.name if project.created_by else "未知用户",
+                machine_count=sum(node.kind == "machine" for node in nodes),
+                node_count=len(nodes),
+                claim_count=sum(len(node.claims) for node in nodes),
+            )
+        )
+    return result
 
 
 @router.get("/projects/{project_code}", response_model=ComponentProjectOut)

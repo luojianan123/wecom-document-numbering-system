@@ -80,7 +80,7 @@ function makeDraft(kind: ComponentKind, parent: WorkNode | null): ComponentDraft
     parent_client_id: parent?.draft?.client_id ?? null, kind, name: "", is_prototype: false };
 }
 async function addDraft(kind: ComponentKind, parent: WorkNode | null = selected.value): Promise<void> {
-  if (["software", "other"].includes(kind)) { showToast(`${labels[kind]}编号规则尚未配置`); return; }
+  if (kind === "software") { showToast(`${labels[kind]}编号规则尚未配置`); return; }
   const draft = makeDraft(kind, parent); drafts.value.push(draft);
   selectedKey.value = draftKey(draft.client_id); editingSaved.value = false;
   await nextTick();
@@ -240,8 +240,8 @@ function resetSearch(): void { searched.value = false; project.value = null; dra
             <div v-if="childKinds.length" class="component-next-level">
               <div><p class="eyebrow">继续询问</p><h3>“{{ selected.name || `未命名${labels[selected.kind]}` }}”下面有什么？</h3></div>
               <div class="component-kind-actions"><button v-for="kind in childKinds" :key="kind" type="button"
-                :disabled="['software', 'other'].includes(kind)" @click="addDraft(kind)">
-                <span>＋</span><strong>{{ labels[kind] }}</strong><small>{{ ['software', 'other'].includes(kind) ? "规则待定" : "增加一个" }}</small></button></div>
+                :disabled="kind === 'software'" @click="addDraft(kind)">
+                <span>＋</span><strong>{{ labels[kind] }}</strong><small>{{ kind === 'software' ? "规则待定" : "增加一个" }}</small></button></div>
             </div>
             <div v-else class="component-leaf-note">该节点是当前规则下的末级，无需继续填写。</div>
           </template>

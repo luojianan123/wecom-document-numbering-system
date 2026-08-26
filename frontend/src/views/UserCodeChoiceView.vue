@@ -8,13 +8,13 @@ const router = useRouter();
 <template>
   <main class="app-page">
     <div class="page-wrap view-choice-wrap">
-      <AppHeader eyebrow="用户界面" title="选择编码类型" />
+      <AppHeader eyebrow="用户界面" title="选择编号类型" />
 
       <section class="panel view-choice-panel">
         <div class="section-heading view-choice-heading">
           <div>
             <p class="eyebrow">进入系统</p>
-            <h2>请选择需要办理的编码业务</h2>
+            <h2>请选择需要办理的编号业务</h2>
           </div>
         </div>
 
@@ -25,9 +25,9 @@ const router = useRouter();
             @click="router.push('/user/components')"
           >
             <span class="view-choice-index">01</span>
-            <strong>产品组件编码</strong>
-            <p>产品、板卡、软件及其他组件编码。</p>
-            <small>进入产品组件编码 →</small>
+            <strong>产品组件编号</strong>
+            <p>产品、板卡、软件及其他组件编号。</p>
+            <small>进入产品组件编号 →</small>
           </button>
 
           <button
@@ -36,9 +36,9 @@ const router = useRouter();
             @click="router.push('/user/files')"
           >
             <span class="view-choice-index">02</span>
-            <strong>文件编码</strong>
+            <strong>文件编号</strong>
             <p>查询文件编号、申请新编号，并领取和复制编号。</p>
-            <small>进入文件编码 →</small>
+            <small>进入文件编号 →</small>
           </button>
         </div>
       </section>

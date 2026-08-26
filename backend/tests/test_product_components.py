@@ -23,7 +23,7 @@ def test_component_project_full_numbering_flow(client: TestClient) -> None:
     assert created.status_code == 200, created.text
     project = created.json()
     machine = project["nodes"][0]
-    assert machine["code"] == "GH2468-XHCLJ-00-G"
+    assert machine["code"] == "GH2468-XHCLJ-00-G-1.00"
 
     component = client.post(
         f"/api/component-codes/projects/{project['id']}/nodes",
@@ -37,7 +37,7 @@ def test_component_project_full_numbering_flow(client: TestClient) -> None:
     )
     assert component.status_code == 200, component.text
     component_node = component.json()
-    assert component_node["code"] == "GH2468-XHCLJ-01-00-Z"
+    assert component_node["code"] == "GH2468-XHCLJ-01-00-Z-2.00"
 
     structure = client.post(
         f"/api/component-codes/projects/{project['id']}/nodes",
@@ -59,8 +59,8 @@ def test_component_project_full_numbering_flow(client: TestClient) -> None:
         },
         headers={"X-CSRF-Token": csrf},
     ).json()
-    assert structure["code"] == "GH2468-XHCLJ-01-01-G"
-    assert hardware["code"] == "GH2468-XHCLJ-01-10-G"
+    assert structure["code"] == "GH2468-XHCLJ-01-01-G-1.00"
+    assert hardware["code"] == "GH2468-XHCLJ-01-10-G-1.00"
 
     part = client.post(
         f"/api/component-codes/projects/{project['id']}/nodes",
@@ -73,7 +73,7 @@ def test_component_project_full_numbering_flow(client: TestClient) -> None:
         headers={"X-CSRF-Token": csrf},
     )
     assert part.status_code == 200, part.text
-    assert part.json()["code"] == "GH2468-XHCLJ-01-10-00-G"
+    assert part.json()["code"] == "GH2468-XHCLJ-01-10-00-G-1.00"
 
     software = client.post(
         f"/api/component-codes/projects/{project['id']}/nodes",
@@ -87,6 +87,64 @@ def test_component_project_full_numbering_flow(client: TestClient) -> None:
     )
     assert software.status_code == 400
     assert "规则尚未配置" in software.json()["detail"]
+
+    other = client.post(
+        f"/api/component-codes/projects/{project['id']}/nodes",
+        json={
+            "parent_id": component_node["id"],
+            "kind": "other",
+            "name": "其他组成",
+            "is_prototype": False,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert other.status_code == 200, other.text
+    assert other.json()["code"] == "GH2468-XHCLJ-01-20-G-1.00"
+
+    other_prototype = client.post(
+        f"/api/component-codes/projects/{project['id']}/nodes",
+        json={
+            "parent_id": component_node["id"],
+            "kind": "other",
+            "name": "其他正样组成",
+            "is_prototype": True,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert other_prototype.status_code == 200, other_prototype.text
+    assert other_prototype.json()["code"] == "GH2468-XHCLJ-01-21-Z-2.00"
+
+
+def test_admin_lists_component_projects_with_creators_and_claims(
+    client: TestClient,
+) -> None:
+    user_csrf = login(client, "user", "component-list-creator")
+    project = client.post(
+        "/api/component-codes/projects",
+        json={"project_code": "7401", "machine_name": "列表验证机"},
+        headers={"X-CSRF-Token": user_csrf},
+    ).json()
+    machine = project["nodes"][0]
+    client.post(
+        f"/api/component-codes/nodes/{machine['id']}/claim",
+        headers={"X-CSRF-Token": user_csrf},
+    )
+
+    admin_csrf = login(client, "admin", "component-list-admin")
+    listed = client.get("/api/component-codes/projects/admin/list")
+    assert listed.status_code == 200, listed.text
+    summary = next(item for item in listed.json() if item["project_code"] == "7401")
+    assert summary["created_by_name"] == "普通用户"
+    assert summary["machine_count"] == 1
+    assert summary["node_count"] == 1
+    assert summary["claim_count"] == 1
+
+    detail = client.get("/api/component-codes/projects/7401")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["created_by_name"] == "普通用户"
+    assert detail.json()["nodes"][0]["created_by_name"] == "普通用户"
+    assert detail.json()["nodes"][0]["claims"][0]["claimant_name"] == "普通用户"
+    assert admin_csrf
 
 
 def test_component_edit_claim_export_and_recursive_delete(client: TestClient) -> None:
@@ -110,7 +168,7 @@ def test_component_edit_claim_export_and_recursive_delete(client: TestClient) ->
 
     edited = client.post(
         f"/api/component-codes/projects/{project['id']}/nodes/{component['id']}",
-        json={"name": "修正组件", "code": "GH1357-CSJ-01-00-G"},
+        json={"name": "修正组件", "code": "GH1357-CSJ-01-00-G-1.00"},
         headers={"X-CSRF-Token": csrf},
     )
     assert edited.status_code == 200
@@ -219,9 +277,9 @@ def test_component_delete_renumbers_following_tree(client: TestClient) -> None:
         headers={"X-CSRF-Token": csrf},
     ).json()
     by_name = {node["name"]: node for node in project["nodes"]}
-    assert by_name["保留组件"]["code"] == "GH4680-ZPYZJ-02-00-G"
-    assert by_name["保留硬件"]["code"] == "GH4680-ZPYZJ-02-10-G"
-    assert by_name["保留零件"]["code"] == "GH4680-ZPYZJ-02-10-00-G"
+    assert by_name["保留组件"]["code"] == "GH4680-ZPYZJ-02-00-G-1.00"
+    assert by_name["保留硬件"]["code"] == "GH4680-ZPYZJ-02-10-G-1.00"
+    assert by_name["保留零件"]["code"] == "GH4680-ZPYZJ-02-10-00-G-1.00"
 
     deleted = client.post(
         f"/api/component-codes/projects/{project['id']}/bulk-delete",
@@ -231,7 +289,7 @@ def test_component_delete_renumbers_following_tree(client: TestClient) -> None:
     assert deleted.status_code == 204, deleted.text
     before_renumber = client.get("/api/component-codes/projects/4680").json()
     stale = {node["name"]: node["code"] for node in before_renumber["nodes"]}
-    assert stale["保留组件"] == "GH4680-ZPYZJ-02-00-G"
+    assert stale["保留组件"] == "GH4680-ZPYZJ-02-00-G-1.00"
 
     generated = client.post(
         f"/api/component-codes/projects/{project['id']}/renumber",
@@ -241,9 +299,9 @@ def test_component_delete_renumbers_following_tree(client: TestClient) -> None:
     refreshed = client.get("/api/component-codes/projects/4680").json()
     renumbered = {node["name"]: node["code"] for node in refreshed["nodes"]}
     assert "待删除组件" not in renumbered
-    assert renumbered["保留组件"] == "GH4680-ZPYZJ-01-00-G"
-    assert renumbered["保留硬件"] == "GH4680-ZPYZJ-01-10-G"
-    assert renumbered["保留零件"] == "GH4680-ZPYZJ-01-10-00-G"
+    assert renumbered["保留组件"] == "GH4680-ZPYZJ-01-00-G-1.00"
+    assert renumbered["保留硬件"] == "GH4680-ZPYZJ-01-10-G-1.00"
+    assert renumbered["保留零件"] == "GH4680-ZPYZJ-01-10-00-G-1.00"
 
 
 def test_component_delete_first_part_resets_remaining_part_to_zero(
@@ -285,7 +343,7 @@ def test_component_delete_first_part_resets_remaining_part_to_zero(
         headers={"X-CSRF-Token": csrf},
     ).json()
     by_name = {node["name"]: node for node in project["nodes"]}
-    assert by_name["控制单元板PCB设计"]["code"].endswith("-01-G")
+    assert by_name["控制单元板PCB设计"]["code"].endswith("-01-G-1.00")
 
     deleted = client.post(
         f"/api/component-codes/projects/{project['id']}/bulk-delete",
@@ -299,7 +357,7 @@ def test_component_delete_first_part_resets_remaining_part_to_zero(
         for node in before_renumber["nodes"]
         if node["name"] == "控制单元板PCB设计"
     )
-    assert stale_part["code"].endswith("-01-G")
+    assert stale_part["code"].endswith("-01-G-1.00")
 
     generated = client.post(
         f"/api/component-codes/projects/{project['id']}/renumber",
@@ -310,7 +368,7 @@ def test_component_delete_first_part_resets_remaining_part_to_zero(
     remaining = next(
         node for node in refreshed["nodes"] if node["name"] == "控制单元板PCB设计"
     )
-    assert remaining["code"].endswith("-00-G")
+    assert remaining["code"].endswith("-00-G-1.00")
     assert remaining["sequence"] == 0
 
 
@@ -347,7 +405,7 @@ def test_component_manual_edit_validates_level_and_updates_metadata(
 
     invalid = client.post(
         f"/api/component-codes/projects/{project['id']}/nodes/{hardware['id']}",
-        json={"name": "验证硬件", "code": "GH8642-YZJ-01-01-G"},
+        json={"name": "验证硬件", "code": "GH8642-YZJ-01-01-G-1.00"},
         headers={"X-CSRF-Token": csrf},
     )
     assert invalid.status_code == 400
@@ -355,7 +413,7 @@ def test_component_manual_edit_validates_level_and_updates_metadata(
 
     wrong_parent = client.post(
         f"/api/component-codes/projects/{project['id']}/nodes/{hardware['id']}",
-        json={"name": "验证硬件", "code": "GH8642-OTHER-01-12-Z"},
+        json={"name": "验证硬件", "code": "GH8642-OTHER-01-12-Z-2.00"},
         headers={"X-CSRF-Token": csrf},
     )
     assert wrong_parent.status_code == 400
@@ -363,13 +421,21 @@ def test_component_manual_edit_validates_level_and_updates_metadata(
 
     edited = client.post(
         f"/api/component-codes/projects/{project['id']}/nodes/{hardware['id']}",
-        json={"name": "验证硬件正样", "code": "gh8642-yzj-01-12-z"},
+        json={"name": "验证硬件正样", "code": "gh8642-yzj-01-12-z-2.00"},
         headers={"X-CSRF-Token": csrf},
     )
     assert edited.status_code == 200, edited.text
-    assert edited.json()["code"] == "GH8642-YZJ-01-12-Z"
+    assert edited.json()["code"] == "GH8642-YZJ-01-12-Z-2.00"
     assert edited.json()["stage"] == "Z"
     assert edited.json()["sequence"] == 12
+
+    wrong_version = client.post(
+        f"/api/component-codes/projects/{project['id']}/nodes/{hardware['id']}",
+        json={"name": "验证硬件正样", "code": "GH8642-YZJ-01-12-Z-1.00"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert wrong_version.status_code == 400
+    assert "Z阶段的版本号必须为2.00" in wrong_version.json()["detail"]
 
 
 def test_generate_complete_component_tree_in_one_batch(client: TestClient) -> None:
@@ -420,11 +486,11 @@ def test_generate_complete_component_tree_in_one_batch(client: TestClient) -> No
     assert generated.status_code == 200, generated.text
     codes = {node["name"]: node["code"] for node in generated.json()["nodes"]}
     assert codes == {
-        "批量验证机": "GH9753-PLYZJ-00-G",
-        "主控部组件": "GH9753-PLYZJ-01-00-G",
-        "主控板": "GH9753-PLYZJ-01-10-Z",
-        "处理器": "GH9753-PLYZJ-01-10-00-G",
-        "机箱": "GH9753-PLYZJ-01-01-G",
+        "批量验证机": "GH9753-PLYZJ-00-G-1.00",
+        "主控部组件": "GH9753-PLYZJ-01-00-G-1.00",
+        "主控板": "GH9753-PLYZJ-01-10-Z-2.00",
+        "处理器": "GH9753-PLYZJ-01-10-00-G-1.00",
+        "机箱": "GH9753-PLYZJ-01-01-G-1.00",
     }
 
 

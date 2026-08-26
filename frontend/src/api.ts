@@ -5,6 +5,7 @@ import type {
   ComponentKind,
   ComponentNode,
   ComponentProject,
+  ComponentProjectSummary,
   ClaimRecord,
   FileCode,
   GenerateCodeResult,
@@ -369,6 +370,10 @@ export function rejectAdminNameReview(
 
 export function getComponentProject(projectCode: string): Promise<ComponentProject> {
   return request<ComponentProject>(`/api/component-codes/projects/${projectCode}`);
+}
+
+export function listAdminComponentProjects(): Promise<ComponentProjectSummary[]> {
+  return request<ComponentProjectSummary[]>("/api/component-codes/projects/admin/list");
 }
 
 export function createComponentProject(

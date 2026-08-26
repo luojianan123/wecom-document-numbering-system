@@ -182,6 +182,7 @@ class ComponentNodeOut(BaseModel):
     code: str
     stage: str
     sequence: int
+    created_by_name: str
     claims: list[ComponentClaimOut] = Field(default_factory=list)
 
 
@@ -190,7 +191,19 @@ class ComponentProjectOut(BaseModel):
     project_code: str
     status: str
     created_at: datetime
+    created_by_name: str
     nodes: list[ComponentNodeOut] = Field(default_factory=list)
+
+
+class ComponentProjectSummaryOut(BaseModel):
+    id: int
+    project_code: str
+    status: str
+    created_at: datetime
+    created_by_name: str
+    machine_count: int
+    node_count: int
+    claim_count: int
 
 
 class ComponentProjectCreateIn(BaseModel):

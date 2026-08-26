@@ -242,6 +242,7 @@ class ComponentProject(Base):
     nodes: Mapped[list["ComponentNode"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
+    created_by: Mapped[User] = relationship(foreign_keys=[created_by_id])
 
 
 class ComponentNode(Base):
@@ -266,6 +267,7 @@ class ComponentNode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     project: Mapped[ComponentProject] = relationship(back_populates="nodes")
+    created_by: Mapped[User] = relationship(foreign_keys=[created_by_id])
     parent: Mapped["ComponentNode | None"] = relationship(remote_side="ComponentNode.id")
     claims: Mapped[list["ComponentClaim"]] = relationship(
         back_populates="node", cascade="all, delete-orphan"

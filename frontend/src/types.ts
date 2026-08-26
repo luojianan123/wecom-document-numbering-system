@@ -130,6 +130,7 @@ export interface ComponentNode {
   code: string;
   stage: "G" | "Z";
   sequence: number;
+  created_by_name: string;
   claims: ComponentClaim[];
 }
 
@@ -138,7 +139,19 @@ export interface ComponentProject {
   project_code: string;
   status: string;
   created_at: string;
+  created_by_name: string;
   nodes: ComponentNode[];
+}
+
+export interface ComponentProjectSummary {
+  id: number;
+  project_code: string;
+  status: string;
+  created_at: string;
+  created_by_name: string;
+  machine_count: number;
+  node_count: number;
+  claim_count: number;
 }
 
 export interface ComponentDraftNode {

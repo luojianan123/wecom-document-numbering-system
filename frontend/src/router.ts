@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { authState, loadSession } from "./auth";
 import AdminView from "./views/AdminView.vue";
+import AdminComponentProjectsView from "./views/AdminComponentProjectsView.vue";
 import LoginView from "./views/LoginView.vue";
 import ProductComponentView from "./views/ProductComponentView.vue";
 import UserCodeChoiceView from "./views/UserCodeChoiceView.vue";
@@ -21,6 +22,7 @@ export const router = createRouter({
     { path: "/user/files", component: UserView, meta: { role: "user" } },
     { path: "/user/components", component: ProductComponentView, meta: { role: "user" } },
     { path: "/admin", component: AdminView, meta: { role: "admin" } },
+    { path: "/admin/components", component: AdminComponentProjectsView, meta: { role: "admin" } },
     { path: "/:pathMatch(.*)*", redirect: "/" }
   ]
 });
