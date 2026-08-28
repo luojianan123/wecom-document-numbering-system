@@ -30,8 +30,19 @@ def machine_abbreviation(name: str) -> str:
     return abbreviation
 
 
-def stage_code(is_prototype: bool) -> str:
-    return "Z" if is_prototype else "G"
+VALID_STAGES = {"C", "M", "Z", "G"}
+
+
+def stage_code(stage: str | bool | None = None, is_prototype: bool = False) -> str:
+    """Normalize the current four-stage code, retaining old boolean callers."""
+    if isinstance(stage, bool):
+        return "Z" if stage else "G"
+    if stage is None:
+        return "Z" if is_prototype else "G"
+    value = stage.strip().upper()
+    if value not in VALID_STAGES:
+        raise ComponentNumberingError("研制阶段必须为 C、M、Z 或 G")
+    return value
 
 
 def version_code(stage: str) -> str:
@@ -50,25 +61,25 @@ def validate_node_code(
     if node.kind == "machine":
         pattern = (
             rf"^GH{re.escape(project_code)}-[A-Z]{{1,6}}-00-"
-            rf"(?P<stage>[GZ])-(?P<version>[12]\.00)$"
+            rf"(?P<stage>[CMZG])-(?P<version>[12]\.00)$"
         )
         sequence = 0
     elif node.kind == "component":
         pattern = (
             rf"^GH{re.escape(project_code)}-[A-Z]{{1,6}}-\d{{2}}-00-"
-            rf"(?P<stage>[GZ])-(?P<version>[12]\.00)$"
+            rf"(?P<stage>[CMZG])-(?P<version>[12]\.00)$"
         )
         sequence = int(parts[2]) if len(parts) == 6 and parts[2].isdigit() else -1
     elif node.kind in {"structure", "hardware", "other"}:
         pattern = (
             rf"^GH{re.escape(project_code)}-[A-Z]{{1,6}}-\d{{2}}-\d{{2}}-"
-            rf"(?P<stage>[GZ])-(?P<version>[12]\.00)$"
+            rf"(?P<stage>[CMZG])-(?P<version>[12]\.00)$"
         )
         sequence = int(parts[3]) if len(parts) == 6 and parts[3].isdigit() else -1
     elif node.kind == "part":
         pattern = (
             rf"^GH{re.escape(project_code)}-[A-Z]{{1,6}}-\d{{2}}-\d{{2}}-\d{{2}}-"
-            rf"(?P<stage>[GZ])-(?P<version>[12]\.00)$"
+            rf"(?P<stage>[CMZG])-(?P<version>[12]\.00)$"
         )
         sequence = int(parts[4]) if len(parts) == 7 and parts[4].isdigit() else -1
     else:
@@ -85,8 +96,8 @@ def validate_node_code(
         raise ComponentNumberingError("序列号必须为00至99")
     if node.kind == "component" and sequence == 0:
         raise ComponentNumberingError("部组件序列号必须从01开始")
-    if node.kind == "structure" and sequence == 0:
-        raise ComponentNumberingError("结构序列号必须从01开始")
+    if node.kind == "structure" and (sequence == 0 or 11 <= sequence < 30):
+        raise ComponentNumberingError("结构序列号必须使用01至10或30至99")
     if node.kind == "hardware" and sequence < 10:
         raise ComponentNumberingError("硬件序列号必须从10开始")
     if node.kind == "other" and sequence < 20:
@@ -145,6 +156,13 @@ def sequence_start(kind: str) -> int:
         "other": 20,
         "part": 0,
     }.get(kind, 0)
+
+
+def sequence_for_index(kind: str, index: int) -> int:
+    """Return the sequence number for a zero-based sibling position."""
+    if kind == "structure":
+        return index + 1 if index < 10 else index + 20
+    return sequence_start(kind) + index
 
 
 def kind_label(kind: str) -> str:

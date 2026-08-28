@@ -16,7 +16,35 @@ def test_loads_real_abbreviation_workbook() -> None:
 def test_prefers_longest_specific_alias() -> None:
     registry = AbbreviationRegistry(ROOT / "文件简号.xlsx")
     assert registry.match("1234控制模块调试作业指导书").code == "TS"
-    assert registry.match("1234控制模块作业指导书").code == "ZD"
+    assert registry.match("1234控制模块作业指导书").code == "TS"
+
+
+@pytest.mark.parametrize(
+    ("suffix", "expected_code"),
+    [
+        ("开发计划", "SDP"),
+        ("质量保证计划", "SQA"),
+        ("质量保证大纲", "SQA"),
+        ("质保计划", "SQA"),
+        ("质保大纲", "SQA"),
+        ("配置管理计划", "SCP"),
+        ("调试记录", "TJ"),
+        ("调试作业指导书", "TS"),
+        ("调试指导书", "TS"),
+        ("作业指导书", "TS"),
+        ("技术状态管理计划", "CP"),
+    ],
+)
+def test_fixed_suffix_abbreviations_override_workbook_matches(
+    suffix: str,
+    expected_code: str,
+) -> None:
+    registry = AbbreviationRegistry(ROOT / "文件简号.xlsx")
+
+    matched = registry.match(f"火星地物高光谱成像仪{suffix}")
+
+    assert matched.code == expected_code
+    assert matched.alias == suffix
 
 
 def test_handles_merged_cells_and_shared_suffixes() -> None:

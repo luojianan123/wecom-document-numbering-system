@@ -22,6 +22,27 @@ class AbbreviationMatch:
     is_software: bool = False
 
 
+FIXED_SUFFIX_ABBREVIATIONS: tuple[tuple[str, str], ...] = tuple(
+    sorted(
+        (
+            ("技术状态管理计划", "CP"),
+            ("调试作业指导书", "TS"),
+            ("质量保证计划", "SQA"),
+            ("质量保证大纲", "SQA"),
+            ("配置管理计划", "SCP"),
+            ("调试指导书", "TS"),
+            ("作业指导书", "TS"),
+            ("质保计划", "SQA"),
+            ("质保大纲", "SQA"),
+            ("开发计划", "SDP"),
+            ("调试记录", "TJ"),
+        ),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+)
+
+
 def normalize_for_match(value: str) -> str:
     value = unicodedata.normalize("NFKC", value).casefold()
     return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", value)
@@ -202,6 +223,14 @@ class AbbreviationRegistry:
 
     def match(self, file_name: str) -> AbbreviationMatch:
         targets = tuple(normalize_for_match(name) for name in abbreviation_match_names(file_name))
+        normalized_file_name = normalize_for_match(file_name)
+        for suffix, code in FIXED_SUFFIX_ABBREVIATIONS:
+            if normalized_file_name.endswith(normalize_for_match(suffix)):
+                return AbbreviationMatch(
+                    alias=suffix,
+                    code=code,
+                    is_software="软件" in normalized_file_name,
+                )
         matches = [
             match
             for key, match in self._aliases.items()

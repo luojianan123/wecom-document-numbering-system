@@ -115,6 +115,42 @@ def test_component_project_full_numbering_flow(client: TestClient) -> None:
     assert other_prototype.json()["code"] == "GH2468-XHCLJ-01-21-Z-2.00"
 
 
+def test_structure_sequence_moves_to_thirty_after_ten(client: TestClient) -> None:
+    csrf = login(client, "user", "component-structure-sequence")
+    project = client.post(
+        "/api/component-codes/projects",
+        json={"project_code": "2469", "machine_name": "结构序号验证机"},
+        headers={"X-CSRF-Token": csrf},
+    ).json()
+    machine = project["nodes"][0]
+    component = client.post(
+        f"/api/component-codes/projects/{project['id']}/nodes",
+        json={
+            "parent_id": machine["id"],
+            "kind": "component",
+            "name": "结构序号验证部组件",
+        },
+        headers={"X-CSRF-Token": csrf},
+    ).json()
+
+    structures = []
+    for index in range(11):
+        structure = client.post(
+            f"/api/component-codes/projects/{project['id']}/nodes",
+            json={
+                "parent_id": component["id"],
+                "kind": "structure",
+                "name": f"结构{index + 1}",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert structure.status_code == 200, structure.text
+        structures.append(structure.json())
+
+    assert [node["sequence"] for node in structures] == [*range(1, 11), 30]
+    assert structures[-1]["code"] == "GH2469-JGXHYZ-01-30-G-1.00"
+
+
 def test_admin_lists_component_projects_with_creators_and_claims(
     client: TestClient,
 ) -> None:

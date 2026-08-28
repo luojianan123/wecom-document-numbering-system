@@ -30,7 +30,7 @@ from ..services.product_components import (
     build_machine_code,
     kind_label,
     rebuild_code_suffix,
-    sequence_start,
+    sequence_for_index,
     stage_code,
     validate_node_code,
 )
@@ -105,12 +105,14 @@ def _next_sequence(db: Session, parent_id: int, kind: str) -> int:
             )
         )
     )
-    sequence = sequence_start(kind)
-    while sequence in used:
-        sequence += 1
-    if sequence > 99:
-        raise ComponentNumberingError("该层级两位序列号已用完")
-    return sequence
+    index = 0
+    while True:
+        sequence = sequence_for_index(kind, index)
+        if sequence > 99:
+            raise ComponentNumberingError("该层级两位序列号已用完")
+        if sequence not in used:
+            return sequence
+        index += 1
 
 
 def _create_draft_node(
@@ -120,7 +122,7 @@ def _create_draft_node(
     parent: ComponentNode | None,
     user: User,
 ) -> ComponentNode:
-    stage = stage_code(payload.is_prototype)
+    stage = stage_code(payload.stage, payload.is_prototype)
     name = payload.name.strip()
     if payload.kind == "machine":
         if parent is not None:
@@ -192,7 +194,7 @@ def _renumber_descendants(db: Session, parent: ComponentNode) -> list[ComponentN
     changed: list[ComponentNode] = []
     for kind, siblings in by_kind.items():
         for offset, child in enumerate(siblings):
-            child.sequence = sequence_start(kind) + offset
+            child.sequence = sequence_for_index(kind, offset)
             changed.append(child)
             changed.extend(_renumber_descendants(db, child))
     return changed
@@ -284,7 +286,7 @@ def create_project(
     )
     db.add(project)
     db.flush()
-    stage = stage_code(payload.is_prototype)
+    stage = stage_code(payload.stage, payload.is_prototype)
     machine = ComponentNode(
         component_project_id=project.id,
         parent_id=None,
@@ -382,7 +384,7 @@ def add_machine(
         )
     ):
         raise HTTPException(status_code=409, detail="该项目下整机名称不能重复")
-    stage = stage_code(payload.is_prototype)
+    stage = stage_code(payload.stage, payload.is_prototype)
     node = ComponentNode(
         component_project_id=project.id,
         parent_id=None,
@@ -415,7 +417,7 @@ def add_node(
     parent = _get_node(db, project_id, payload.parent_id)
     try:
         sequence = _next_sequence(db, parent.id, payload.kind)
-        stage = stage_code(payload.is_prototype)
+        stage = stage_code(payload.stage, payload.is_prototype)
         code = build_child_code(parent, payload.kind, sequence, stage)
     except ComponentNumberingError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -20,6 +20,9 @@ export interface Project {
   project_name: string;
   status: string;
   special_numbering: boolean;
+  product_names: string[];
+  board_names: string[];
+  software_names: string[];
   created_at: string;
 }
 
@@ -128,7 +131,7 @@ export interface ComponentNode {
   kind: ComponentKind;
   name: string;
   code: string;
-  stage: "G" | "Z";
+  stage: "C" | "M" | "Z" | "G";
   sequence: number;
   created_by_name: string;
   claims: ComponentClaim[];
@@ -160,5 +163,5 @@ export interface ComponentDraftNode {
   parent_client_id: string | null;
   kind: ComponentKind;
   name: string;
-  is_prototype: boolean;
+  stage: "C" | "M" | "Z" | "G";
 }

@@ -36,6 +36,9 @@ import type {
 const projectName = ref("");
 const projectCode = ref("");
 const projectSpecialNumbering = ref(false);
+const projectProductNames = ref("");
+const projectBoardNames = ref("");
+const projectSoftwareNames = ref("");
 const selectedFile = ref<File | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const result = ref<ProjectInitResult | null>(null);
@@ -315,12 +318,23 @@ async function initialize(): Promise<void> {
     showToast("请选择 XLSX 或 CSV 清单");
     return;
   }
+  if (
+    !projectProductNames.value.trim() &&
+    !projectBoardNames.value.trim() &&
+    !projectSoftwareNames.value.trim()
+  ) {
+    showToast("请至少填写一个产品、板卡或软件名称");
+    return;
+  }
   loading.value = true;
   try {
     const initialized = await initializeProject(
       projectName.value.trim(),
       projectCode.value,
       projectSpecialNumbering.value,
+      projectProductNames.value,
+      projectBoardNames.value,
+      projectSoftwareNames.value,
       selectedFile.value
     );
     showResult(initialized);
@@ -921,6 +935,33 @@ async function confirm(): Promise<void> {
               placeholder="4位项目号，单独填写"
               maxlength="4"
               inputmode="numeric"
+            />
+            <van-field
+              v-model="projectProductNames"
+              label="产品名称"
+              type="textarea"
+              rows="2"
+              autosize
+              maxlength="4096"
+              placeholder="每行一个产品名称，没有可留空"
+            />
+            <van-field
+              v-model="projectBoardNames"
+              label="板卡名称"
+              type="textarea"
+              rows="2"
+              autosize
+              maxlength="4096"
+              placeholder="每行一个板卡名称，没有可留空"
+            />
+            <van-field
+              v-model="projectSoftwareNames"
+              label="软件名称"
+              type="textarea"
+              rows="2"
+              autosize
+              maxlength="4096"
+              placeholder="每行一个软件名称，没有可留空"
             />
           </van-cell-group>
 

@@ -23,6 +23,9 @@ const labels: Record<ComponentKind, string> = {
   machine: "整机", component: "部组件", structure: "结构", hardware: "硬件",
   software: "软件/逻辑", other: "其他", part: "零件"
 };
+const stageLabels: Record<string, string> = {
+  C: "初样件/电性件", M: "模样件", Z: "正样件", G: "其他"
+};
 
 const filteredProjects = computed(() => {
   const query = projectQuery.value.trim();
@@ -171,7 +174,7 @@ onMounted(loadProjects);
                 <div><strong>{{ node.name }}</strong><small>{{ labels[node.kind] }}</small></div>
               </div>
               <code>{{ node.code }}</code>
-              <div class="admin-node-owner"><span>创建人：{{ node.created_by_name }}</span><span>{{ node.stage === "Z" ? "正样件" : "其他" }}</span></div>
+              <div class="admin-node-owner"><span>创建人：{{ node.created_by_name }}</span><span>{{ stageLabels[node.stage] ?? node.stage }}（{{ node.stage }}）</span></div>
               <div class="admin-node-claims">
                 <span v-if="!node.claims.length" class="admin-unclaimed">未领取</span>
                 <span v-for="claim in node.claims" :key="claim.id">{{ claim.claimant_name }}（{{ formatDate(claim.claimed_at) }}）</span>

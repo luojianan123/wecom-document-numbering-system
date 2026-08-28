@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from sqlalchemy import delete, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -53,6 +53,25 @@ from ..services.numbering import GeneratedNumber, NumberingService, extract_func
 from ..services.uploads import UploadError, parse_file_names
 
 router = APIRouter(prefix="/api/admin", tags=["管理员"])
+
+
+def _parse_subject_names(value: str, label: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw_name in re.split(r"[\r\n,，、;；]+", value):
+        name = normalize_file_name(raw_name)
+        if not name:
+            continue
+        if len(name) > 256:
+            raise HTTPException(status_code=400, detail=f"{label}名称不能超过256个字符")
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    if len(names) > 200:
+        raise HTTPException(status_code=400, detail=f"{label}名称最多填写200个")
+    return names
 
 
 def _format_claimed_at(value: datetime) -> str:
@@ -444,15 +463,38 @@ def export_project_codes(
             detail="仍有待确认、失败或已重复文件，全部处理后才能导出",
         )
 
-    file_codes = list(
+    batch_items = list(
         db.scalars(
-            select(FileCode)
+            select(ProjectBatchItem)
             .where(
+                ProjectBatchItem.project_id == project_id,
+                ProjectBatchItem.file_code_id.is_not(None),
+            )
+            .order_by(ProjectBatchItem.id)
+        )
+    )
+    ordered_file_code_ids = [
+        item.file_code_id for item in batch_items if item.file_code_id is not None
+    ]
+    file_codes_by_id = {
+        code.id: code
+        for code in db.scalars(
+            select(FileCode).where(
                 FileCode.project_id == project_id,
                 FileCode.enabled.is_(True),
             )
-            .order_by(FileCode.standard_name, FileCode.id)
         )
+    }
+    file_codes = [
+        file_codes_by_id[file_code_id]
+        for file_code_id in ordered_file_code_ids
+        if file_code_id in file_codes_by_id
+    ]
+    ordered_ids = set(ordered_file_code_ids)
+    file_codes.extend(
+        code
+        for code in sorted(file_codes_by_id.values(), key=lambda item: (item.created_at, item.id))
+        if code.id not in ordered_ids
     )
     if not file_codes:
         raise HTTPException(status_code=409, detail="项目编码库为空，不能导出")
@@ -539,6 +581,9 @@ async def initialize_project(
     project_name: str = Form(min_length=1, max_length=128),
     project_code: str = Form(pattern=r"^\d{4}$"),
     special_numbering: bool = Form(default=False),
+    product_names: str = Form(default=""),
+    board_names: str = Form(default=""),
+    software_names: str = Form(default=""),
     file: UploadFile = File(),
     admin: User = Depends(require_admin),
     _: CurrentSession = Depends(require_csrf),
@@ -557,6 +602,9 @@ async def initialize_project(
         project_name=project_name,
         status="initializing",
         special_numbering=special_numbering,
+        product_names=_parse_subject_names(product_names, "产品"),
+        board_names=_parse_subject_names(board_names, "板卡"),
+        software_names=_parse_subject_names(software_names, "软件"),
         created_by_id=admin.id,
     )
     db.add(project)
@@ -965,6 +1013,14 @@ def confirm_project(
         raise HTTPException(
             status_code=409,
             detail="确认入库失败：编码已被其他操作占用，请刷新后重试",
+        ) from exc
+    except OperationalError as exc:
+        db.rollback()
+        if "locked" not in str(exc).lower():
+            raise
+        raise HTTPException(
+            status_code=409,
+            detail="数据库正在处理其他操作，请等待几秒后重新确认",
         ) from exc
 
 

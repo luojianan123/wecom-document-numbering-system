@@ -122,7 +122,6 @@ def test_complete_stage_one_business_flow(client: TestClient) -> None:
         item["standard_name"] for item in all_codes.json()
     )
     assert client.get("/api/projects/999999/codes").status_code == 404
-
     search = client.get(
         "/api/codes/search",
         params={"project_id": project_id, "name": "控制模块"},
@@ -169,6 +168,49 @@ def test_complete_stage_one_business_flow(client: TestClient) -> None:
     assert generated.json()["file_code"]["final_code"] == "GH1234-3TX-010SS-1.00"
     assert generated.json()["file_code"]["standard_name"] == "通信模块使用说明书"
     assert generated.json()["file_code"]["enabled"] is True
+
+
+def test_project_subject_names_are_saved_and_returned_to_users(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={
+            "project_name": "标准主体名称项目",
+            "project_code": "1288",
+            "product_names": "火星地物高光谱成像仪\n火星地物高光谱成像仪",
+            "board_names": "主控板、接口板",
+            "software_names": "成像控制软件，数据处理软件",
+        },
+        files={
+            "file": (
+                "files.csv",
+                "文件名称\n火星地物高光谱成像仪技术要求\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert initialized.status_code == 200, initialized.text
+    project = initialized.json()["project"]
+    assert project["product_names"] == ["火星地物高光谱成像仪"]
+    assert project["board_names"] == ["主控板", "接口板"]
+    assert project["software_names"] == ["成像控制软件", "数据处理软件"]
+
+    confirmed = client.post(
+        f"/api/admin/projects/{project['id']}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+
+    login(client, "user")
+    user_project = next(
+        item for item in client.get("/api/projects").json() if item["id"] == project["id"]
+    )
+    assert user_project["product_names"] == ["火星地物高光谱成像仪"]
+    assert user_project["board_names"] == ["主控板", "接口板"]
+    assert user_project["software_names"] == ["成像控制软件", "数据处理软件"]
 
 
 def test_user_can_generate_requested_name_after_partial_match(
@@ -488,6 +530,62 @@ def test_same_board_reuses_existing_function_code(client: TestClient) -> None:
         )
         assert len(records) == 2
         assert records[0].segment_d == records[1].segment_d
+
+
+def test_same_product_prefix_reuses_existing_function_code(client: TestClient) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={"project_name": "前缀功能码一致性项目", "project_code": "1287"},
+        files={
+            "file": (
+                "files.csv",
+                (
+                    "文件名称\n"
+                    "火星地物高光谱成像仪总装工艺要求\n"
+                    "火星地物高光谱成像仪验收测试细则\n"
+                ).encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert initialized.status_code == 200, initialized.text
+
+    successful_items = [item for item in initialized.json()["items"] if item["success"]]
+    assert len(successful_items) == 2
+    assert successful_items[0]["final_code"].startswith("GH1287-3HX-")
+    assert successful_items[1]["final_code"].startswith("GH1287-3HX-")
+
+
+def test_fixed_suffix_codes_keep_the_same_product_function_code(
+    client: TestClient,
+) -> None:
+    suffix_codes = [
+        ("开发计划", "SDP"),
+        ("质量保证计划", "SQA"),
+        ("配置管理计划", "SCP"),
+        ("调试记录", "TJ"),
+        ("调试作业指导书", "TS"),
+        ("技术状态管理计划", "CP"),
+    ]
+    admin_csrf = login(client, "admin")
+    csv_content = "文件名称\n" + "\n".join(
+        f"火星地物高光谱成像仪{suffix}" for suffix, _ in suffix_codes
+    )
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={"project_name": "固定简号项目", "project_code": "1289"},
+        files={"file": ("files.csv", csv_content.encode(), "text/csv")},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert initialized.status_code == 200, initialized.text
+
+    successful_items = [item for item in initialized.json()["items"] if item["success"]]
+    assert len(successful_items) == len(suffix_codes)
+    for item, (_, expected_file_code) in zip(successful_items, suffix_codes, strict=True):
+        assert item["final_code"].startswith("GH1289-3HX-")
+        assert f"-010{expected_file_code}-" in item["final_code"]
 
 
 @pytest.mark.parametrize(
@@ -1410,6 +1508,60 @@ def test_admin_can_export_all_stored_project_codes_to_excel(
     blocked_again = client.get(f"/api/admin/projects/{project_id}/export")
     assert blocked_again.status_code == 409
     assert "全部处理后才能导出" in blocked_again.json()["detail"]
+
+
+def test_export_keeps_import_order_across_multiple_batches(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={"project_name": "按顺序导出项目", "project_code": "1370"},
+        files={
+            "file": (
+                "first.csv",
+                "文件名称\n显示模块使用说明书\n控制模块技术要求\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert initialized.status_code == 200, initialized.text
+    project_id = initialized.json()["project"]["id"]
+    assert client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).status_code == 200
+
+    imported = client.post(
+        f"/api/admin/projects/{project_id}/codes/import",
+        files={
+            "file": (
+                "second.csv",
+                "文件名称\n通信模块使用说明书\n电源模块使用说明书\n".encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert imported.status_code == 200, imported.text
+    assert client.post(
+        f"/api/admin/projects/{project_id}/confirm",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).status_code == 200
+
+    exported = client.get(f"/api/admin/projects/{project_id}/export")
+    assert exported.status_code == 200, exported.text
+    workbook = load_workbook(BytesIO(exported.content), read_only=True)
+    rows = list(workbook.active.iter_rows(values_only=True))
+    workbook.close()
+
+    assert [row[0] for row in rows[1:]] == [
+        "显示模块使用说明书",
+        "控制模块技术要求",
+        "通信模块使用说明书",
+        "电源模块使用说明书",
+    ]
 
 
 def test_admin_can_batch_delete_mixed_project_files(

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.services.abbreviations import AbbreviationRegistry
 from app.services.name_validation import (
     extract_product_subject,
@@ -95,3 +97,35 @@ def test_function_subject_key_keeps_software_boards_and_products_separate() -> N
     assert function_subject_key("飞鹰主控板测试报告", registry) == "board:飞鹰主控"
     assert function_subject_key("飞鹰主控板使用说明书", registry) == "board:飞鹰主控"
     assert function_subject_key("飞鹰产品测试报告", registry) == "product:飞鹰"
+
+
+def test_function_subject_key_ignores_document_workflow_qualifiers() -> None:
+    registry = AbbreviationRegistry(ROOT / "文件简号.xlsx")
+
+    expected = "product:火星地物高光谱成像仪"
+    assert function_subject_key("火星地物高光谱成像仪总装工艺要求", registry) == expected
+    assert function_subject_key("火星地物高光谱成像仪验收测试细则", registry) == expected
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "开发计划",
+        "质量保证计划",
+        "质量保证大纲",
+        "质保计划",
+        "质保大纲",
+        "配置管理计划",
+        "调试记录",
+        "调试作业指导书",
+        "调试指导书",
+        "作业指导书",
+        "技术状态管理计划",
+    ],
+)
+def test_fixed_abbreviation_suffixes_share_the_same_function_subject(suffix: str) -> None:
+    registry = AbbreviationRegistry(ROOT / "文件简号.xlsx")
+
+    assert function_subject_key(
+        f"火星地物高光谱成像仪{suffix}", registry
+    ) == "product:火星地物高光谱成像仪"

@@ -54,6 +54,9 @@ class Project(Base):
     project_name: Mapped[str] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(16), default="draft")
     special_numbering: Mapped[bool] = mapped_column(Boolean, default=False)
+    product_names: Mapped[list[str]] = mapped_column(JSON, default=list)
+    board_names: Mapped[list[str]] = mapped_column(JSON, default=list)
+    software_names: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

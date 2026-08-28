@@ -43,21 +43,41 @@ GENERIC_PROJECT_WORDS = (
     "文件",
     "文档",
 )
+FUNCTION_SUBJECT_TRAILING_QUALIFIERS = tuple(
+    sorted(
+        (
+            "总装",
+            "装配",
+            "安装",
+            "验收",
+        ),
+        key=len,
+        reverse=True,
+    )
+)
 DOCUMENT_TYPE_SUFFIXES = tuple(
     sorted(
         (
+            "技术状态管理计划",
+            "调试作业指导书",
             "软件配置管理计划",
             "软件质量保证计划",
+            "质量保证计划",
+            "质量保证大纲",
+            "配置管理计划",
             "方案设计报告",
             "详细设计说明书",
             "概要设计说明书",
             "需求规格说明书",
-            "调试作业指导书",
+            "调试指导书",
             "作业指导书",
             "加工工艺要求",
             "外包技术要求",
             "评审结论报告",
             "开发计划",
+            "质保计划",
+            "质保大纲",
+            "调试记录",
             "研制计划",
             "测试计划",
             "试验计划",
@@ -217,6 +237,10 @@ def extract_product_subject(
     for suffix in DOCUMENT_TYPE_SUFFIXES:
         if subject.endswith(suffix):
             subject = subject[: -len(suffix)]
+            break
+    for qualifier in FUNCTION_SUBJECT_TRAILING_QUALIFIERS:
+        if subject.endswith(qualifier):
+            subject = subject[: -len(qualifier)]
             break
     for word in (*STAGE_WORDS, *GENERIC_PROJECT_WORDS):
         subject = subject.replace(word, "")

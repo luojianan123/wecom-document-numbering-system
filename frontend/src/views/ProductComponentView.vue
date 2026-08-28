@@ -11,7 +11,7 @@ import type { ComponentDraftNode, ComponentKind, ComponentNode, ComponentProject
 
 type WorkNode = {
   key: string; parentKey: string | null; kind: ComponentKind; name: string;
-  prototype: boolean; depth: number; saved: boolean; node?: ComponentNode;
+  stage: "C" | "M" | "Z" | "G"; depth: number; saved: boolean; node?: ComponentNode;
   draft?: ComponentDraftNode;
 };
 
@@ -35,22 +35,31 @@ const labels: Record<ComponentKind, string> = {
 const kindOrder: Record<ComponentKind, number> = {
   machine: 0, component: 1, structure: 2, hardware: 3, software: 4, other: 5, part: 6
 };
+const stageOptions = [
+  { value: "C", label: "初样件/电性件" },
+  { value: "M", label: "模样件" },
+  { value: "Z", label: "正样件" },
+  { value: "G", label: "其他" }
+] as const;
 function savedKey(id: number): string { return `saved-${id}`; }
 function draftKey(id: string): string { return `draft-${id}`; }
 function errorMessage(error: unknown): void {
   showToast(error instanceof ApiError ? error.message : "操作失败，请稍后重试");
+}
+function stageLabel(stage: "C" | "M" | "Z" | "G"): string {
+  return stageOptions.find((option) => option.value === stage)?.label ?? stage;
 }
 
 const allNodes = computed<WorkNode[]>(() => {
   const flat: Array<Omit<WorkNode, "depth">> = [];
   for (const node of project.value?.nodes ?? []) {
     flat.push({ key: savedKey(node.id), parentKey: node.parent_id ? savedKey(node.parent_id) : null,
-      kind: node.kind, name: node.name, prototype: node.stage === "Z", saved: true, node });
+      kind: node.kind, name: node.name, stage: node.stage, saved: true, node });
   }
   for (const draft of drafts.value) {
     flat.push({ key: draftKey(draft.client_id),
       parentKey: draft.parent_id ? savedKey(draft.parent_id) : draft.parent_client_id ? draftKey(draft.parent_client_id) : null,
-      kind: draft.kind, name: draft.name, prototype: draft.is_prototype, saved: false, draft });
+      kind: draft.kind, name: draft.name, stage: draft.stage, saved: false, draft });
   }
   const children = new Map<string | null, Array<Omit<WorkNode, "depth">>>();
   for (const node of flat) children.set(node.parentKey, [...(children.get(node.parentKey) ?? []), node]);
@@ -77,7 +86,7 @@ const emptyDrafts = computed(() => drafts.value.length - completedDrafts.value);
 function makeDraft(kind: ComponentKind, parent: WorkNode | null): ComponentDraftNode {
   draftCounter += 1;
   return { client_id: `${Date.now()}-${draftCounter}`, parent_id: parent?.node?.id ?? null,
-    parent_client_id: parent?.draft?.client_id ?? null, kind, name: "", is_prototype: false };
+    parent_client_id: parent?.draft?.client_id ?? null, kind, name: "", stage: "G" };
 }
 async function addDraft(kind: ComponentKind, parent: WorkNode | null = selected.value): Promise<void> {
   if (kind === "software") { showToast(`${labels[kind]}编号规则尚未配置`); return; }
@@ -216,11 +225,11 @@ function resetSearch(): void { searched.value = false; project.value = null; dra
               <span :class="['component-node-state', { draft: !selected.saved }]">{{ selected.saved ? "已生成" : "草稿" }}</span></header>
             <div v-if="selected.draft" class="component-editor-form">
               <label>名称</label><van-field v-model="selected.draft.name" class="component-editor-name" :placeholder="`请输入${labels[selected.kind]}名称`" maxlength="256" />
-              <label>研制阶段</label><van-radio-group v-model="selected.draft.is_prototype" direction="horizontal">
-                <label class="component-stage-check"><input type="checkbox" :checked="!selected.draft.is_prototype"
-                  @change="selected.draft.is_prototype = false" /><span>其他（G）</span></label>
-                <label class="component-stage-check"><input type="checkbox" :checked="selected.draft.is_prototype"
-                  @change="selected.draft.is_prototype = true" /><span>正样件（Z）</span></label>
+              <label>研制阶段</label><van-radio-group v-model="selected.draft.stage" direction="horizontal">
+                <label v-for="option in stageOptions" :key="option.value" class="component-stage-check">
+                  <input v-model="selected.draft.stage" type="radio" name="component-stage" :value="option.value" />
+                  <span>{{ option.label }}（{{ option.value }}）</span>
+                </label>
               </van-radio-group>
             </div>
             <div v-else-if="selected.node" class="component-saved-detail">
@@ -231,7 +240,7 @@ function resetSearch(): void { searched.value = false; project.value = null; dra
               </template>
               <template v-else>
                 <strong>{{ selected.node.name }}</strong><code>{{ selected.node.code }}</code>
-                <p>{{ selected.node.stage === "Z" ? "正样件" : "其他" }} · {{ selected.node.claims.length ? `已领取${selected.node.claims.length}次` : "未领取" }}</p>
+                <p>{{ stageLabel(selected.node.stage) }}（{{ selected.node.stage }}） · {{ selected.node.claims.length ? `已领取${selected.node.claims.length}次` : "未领取" }}</p>
                 <div><van-button size="small" color="#17324d" @click="claim(selected.node)">领取</van-button>
                   <van-button size="small" plain @click="beginSavedEdit(selected.node)">修改</van-button>
                   <van-button size="small" plain type="danger" @click="removeSaved(selected.node)">删除</van-button></div>
@@ -241,7 +250,7 @@ function resetSearch(): void { searched.value = false; project.value = null; dra
               <div><p class="eyebrow">继续询问</p><h3>“{{ selected.name || `未命名${labels[selected.kind]}` }}”下面有什么？</h3></div>
               <div class="component-kind-actions"><button v-for="kind in childKinds" :key="kind" type="button"
                 :disabled="kind === 'software'" @click="addDraft(kind)">
-                <span>＋</span><strong>{{ labels[kind] }}</strong><small>{{ kind === 'software' ? "规则待定" : "增加一个" }}</small></button></div>
+                <span>＋</span><strong>{{ labels[kind] }}</strong><small>{{ kind === 'software' ? "为保证与项目文件编号规则一致，请转到文件编号处对软件/逻辑的代码进行编号" : "增加一个" }}</small></button></div>
             </div>
             <div v-else class="component-leaf-note">该节点是当前规则下的末级，无需继续填写。</div>
           </template>

@@ -151,12 +151,18 @@ export async function initializeProject(
   projectName: string,
   projectCode: string,
   specialNumbering: boolean,
+  productNames: string,
+  boardNames: string,
+  softwareNames: string,
   file: File
 ): Promise<ProjectInitResult> {
   const form = new FormData();
   form.append("project_name", projectName);
   form.append("project_code", projectCode);
   form.append("special_numbering", String(specialNumbering));
+  form.append("product_names", productNames);
+  form.append("board_names", boardNames);
+  form.append("software_names", softwareNames);
   form.append("file", file);
   return request<ProjectInitResult>("/api/admin/projects/init", {
     method: "POST",
@@ -379,14 +385,14 @@ export function listAdminComponentProjects(): Promise<ComponentProjectSummary[]>
 export function createComponentProject(
   projectCode: string,
   machineName: string,
-  isPrototype: boolean
+  stage: "C" | "M" | "Z" | "G"
 ): Promise<ComponentProject> {
   return request<ComponentProject>("/api/component-codes/projects", {
     method: "POST",
     body: JSON.stringify({
       project_code: projectCode,
       machine_name: machineName,
-      is_prototype: isPrototype
+      stage
     })
   });
 }
@@ -404,13 +410,13 @@ export function generateComponentTree(
 export function addComponentMachine(
   projectId: number,
   name: string,
-  isPrototype: boolean
+  stage: "C" | "M" | "Z" | "G"
 ): Promise<ComponentNode> {
   return request<ComponentNode>(
     `/api/component-codes/projects/${projectId}/machines`,
     {
       method: "POST",
-      body: JSON.stringify({ name, is_prototype: isPrototype })
+      body: JSON.stringify({ name, stage })
     }
   );
 }
@@ -420,7 +426,7 @@ export function addComponentNode(
   parentId: number,
   kind: ComponentKind,
   name: string,
-  isPrototype: boolean
+  stage: "C" | "M" | "Z" | "G"
 ): Promise<ComponentNode> {
   return request<ComponentNode>(
     `/api/component-codes/projects/${projectId}/nodes`,
@@ -430,7 +436,7 @@ export function addComponentNode(
         parent_id: parentId,
         kind,
         name,
-        is_prototype: isPrototype
+        stage
       })
     }
   );

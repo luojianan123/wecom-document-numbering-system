@@ -39,6 +39,9 @@ class ProjectOut(BaseModel):
     project_name: str
     status: str
     special_numbering: bool
+    product_names: list[str] = Field(default_factory=list)
+    board_names: list[str] = Field(default_factory=list)
+    software_names: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -210,11 +213,13 @@ class ComponentProjectCreateIn(BaseModel):
     project_code: str = Field(pattern=r"^\d{4}$")
     machine_name: str = Field(min_length=1, max_length=256)
     is_prototype: bool = False
+    stage: Literal["C", "M", "Z", "G"] | None = None
 
 
 class ComponentMachineCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=256)
     is_prototype: bool = False
+    stage: Literal["C", "M", "Z", "G"] | None = None
 
 
 class ComponentNodeCreateIn(BaseModel):
@@ -222,6 +227,7 @@ class ComponentNodeCreateIn(BaseModel):
     kind: Literal["component", "structure", "hardware", "software", "other", "part"]
     name: str = Field(min_length=1, max_length=256)
     is_prototype: bool = False
+    stage: Literal["C", "M", "Z", "G"] | None = None
 
 
 class ComponentNodeUpdateIn(BaseModel):
@@ -240,6 +246,7 @@ class ComponentDraftNodeIn(BaseModel):
     kind: Literal["machine", "component", "structure", "hardware", "software", "other", "part"]
     name: str = Field(min_length=1, max_length=256)
     is_prototype: bool = False
+    stage: Literal["C", "M", "Z", "G"] | None = None
 
 
 class ComponentTreeGenerateIn(BaseModel):

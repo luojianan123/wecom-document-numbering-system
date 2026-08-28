@@ -1,3 +1,4 @@
+from collections import defaultdict
 from dataclasses import asdict
 
 from sqlalchemy import select
@@ -14,6 +15,58 @@ class CodeConflictError(ValueError):
     pass
 
 
+class _BatchState:
+    """Indexes used only during one batch to avoid repeated full-table scans."""
+
+    def __init__(self, service: "CodeService", project_id: int) -> None:
+        existing_items = list(
+            service.db.scalars(select(FileCode).where(FileCode.project_id == project_id))
+        )
+        self.existing_codes_by_name = {
+            item.standard_name: item.final_code for item in existing_items
+        }
+        self.staged_names: set[str] = set()
+        self.unavailable_codes = set(
+            service.db.scalars(select(CodeReservation.final_code))
+        )
+        self.unavailable_codes.update(
+            service.db.scalars(select(FileCode.final_code))
+        )
+        self.function_codes_by_subject: dict[str, set[tuple[str, str]]] = defaultdict(set)
+        for item in existing_items:
+            if item.segment_d:
+                subject_key = function_subject_key(
+                    item.standard_name,
+                    service.numbering.abbreviations,
+                )
+                if subject_key:
+                    self.function_codes_by_subject[subject_key].add(
+                        (normalized_standard_name(item.standard_name), item.segment_d)
+                    )
+
+        for item in service.db.scalars(
+            select(ProjectBatchItem).where(
+                ProjectBatchItem.project_id == project_id,
+                ProjectBatchItem.success.is_(True),
+                ProjectBatchItem.file_code_id.is_(None),
+            )
+        ):
+            if not item.preview_data:
+                continue
+            standard_name = str(item.preview_data.get("standard_name", ""))
+            self.staged_names.add(standard_name)
+            segment_d = str(item.preview_data.get("segment_d", ""))
+            if segment_d:
+                subject_key = function_subject_key(
+                    standard_name,
+                    service.numbering.abbreviations,
+                )
+                if subject_key:
+                    self.function_codes_by_subject[subject_key].add(
+                        (normalized_standard_name(standard_name), segment_d)
+                    )
+
+
 class CodeService:
     def __init__(
         self,
@@ -24,6 +77,7 @@ class CodeService:
         self.db = db
         self.numbering = numbering
         self.name_correction = name_correction
+        self._batch_state: _BatchState | None = None
 
     def required_function_code(
         self,
@@ -36,6 +90,19 @@ class CodeService:
         if not subject_key:
             return None
         normalized_name = normalized_standard_name(standard_name)
+
+        if self._batch_state is not None:
+            function_codes = {
+                code
+                for name, code in self._batch_state.function_codes_by_subject.get(
+                    subject_key, set()
+                )
+                if name != normalized_name
+            }
+            if len(function_codes) > 1:
+                codes = "、".join(sorted(function_codes))
+                raise CodeConflictError(f"同一软件、板卡或产品存在多个历史功能码：{codes}")
+            return next(iter(function_codes), None)
 
         function_codes = {
             item.segment_d
@@ -138,8 +205,11 @@ class CodeService:
             correction.standard_name,
             exclude_batch_item_id=exclude_batch_item_id,
         )
-        unavailable_final_codes = set(self.db.scalars(select(CodeReservation.final_code)))
-        unavailable_final_codes.update(self.db.scalars(select(FileCode.final_code)))
+        if self._batch_state is not None:
+            unavailable_final_codes = self._batch_state.unavailable_codes
+        else:
+            unavailable_final_codes = set(self.db.scalars(select(CodeReservation.final_code)))
+            unavailable_final_codes.update(self.db.scalars(select(FileCode.final_code)))
         generated = self.numbering.generate(
             original_name,
             correction,
@@ -148,33 +218,54 @@ class CodeService:
             required_function_code=required_function_code,
         )
         if check_existing:
-            existing = self.db.scalar(
-                select(FileCode).where(
-                    FileCode.project_id == project.id,
-                    FileCode.standard_name == generated.standard_name,
+            if self._batch_state is not None:
+                existing_code = self._batch_state.existing_codes_by_name.get(
+                    generated.standard_name
                 )
-            )
+                existing = existing_code is not None
+            else:
+                record = self.db.scalar(
+                    select(FileCode).where(
+                        FileCode.project_id == project.id,
+                        FileCode.standard_name == generated.standard_name,
+                    )
+                )
+                existing = record is not None
+                existing_code = record.final_code if record else None
             if existing:
                 raise CodeConflictError(
-                    f"文件“{generated.standard_name}”已存在编码 {existing.final_code}"
+                    f"文件“{generated.standard_name}”已存在编码"
+                    + (f" {existing_code}" if existing_code else "")
                 )
-            reservation = self.db.get(CodeReservation, generated.final_code)
-            if reservation:
+            reservation_exists = (
+                generated.final_code in self._batch_state.unavailable_codes
+                if self._batch_state is not None
+                else self.db.get(CodeReservation, generated.final_code) is not None
+            )
+            if reservation_exists:
                 raise CodeConflictError(f"编码 {generated.final_code} 已被全局占用")
 
         if check_existing:
-            staged_items = self.db.scalars(
-                select(ProjectBatchItem).where(
-                    ProjectBatchItem.project_id == project.id,
-                    ProjectBatchItem.success.is_(True),
-                    ProjectBatchItem.file_code_id.is_(None),
+            if self._batch_state is not None:
+                if generated.standard_name in self._batch_state.staged_names:
+                    raise CodeConflictError(
+                        f"文件“{generated.standard_name}”已在待确认列表中"
+                    )
+            else:
+                staged_items = self.db.scalars(
+                    select(ProjectBatchItem).where(
+                        ProjectBatchItem.project_id == project.id,
+                        ProjectBatchItem.success.is_(True),
+                        ProjectBatchItem.file_code_id.is_(None),
+                    )
                 )
-            )
-            for item in staged_items:
-                if item.id == exclude_batch_item_id or not item.preview_data:
-                    continue
-                if item.preview_data.get("standard_name") == generated.standard_name:
-                    raise CodeConflictError(f"文件“{generated.standard_name}”已在待确认列表中")
+                for item in staged_items:
+                    if item.id == exclude_batch_item_id or not item.preview_data:
+                        continue
+                    if item.preview_data.get("standard_name") == generated.standard_name:
+                        raise CodeConflictError(
+                            f"文件“{generated.standard_name}”已在待确认列表中"
+                        )
         return generated
 
     async def stage_one(
@@ -210,62 +301,76 @@ class CodeService:
         original_names: list[str],
     ) -> list[BatchItemOut]:
         results: list[BatchItemOut] = []
-        for original_name in original_names:
-            try:
-                batch_item, generated = await self.stage_one(
-                    project,
-                    original_name,
-                )
-                self.db.commit()
-                self.db.refresh(batch_item)
-                results.append(
-                    BatchItemOut(
-                        id=batch_item.id,
-                        original_name=original_name,
-                        success=True,
-                        standard_name=generated.standard_name,
-                        final_code=generated.final_code,
+        self._batch_state = _BatchState(self, project.id)
+        try:
+            for original_name in original_names:
+                try:
+                    with self.db.begin_nested():
+                        batch_item, generated = await self.stage_one(project, original_name)
+                        self.db.flush()
+                    self._batch_state.staged_names.add(generated.standard_name)
+                    self._batch_state.unavailable_codes.add(generated.final_code)
+                    subject_key = function_subject_key(
+                        generated.standard_name,
+                        self.numbering.abbreviations,
                     )
-                )
-            except CodeConflictError as exc:
-                self.db.rollback()
-                batch_item = ProjectBatchItem(
-                    project_id=project.id,
-                    original_name=original_name,
-                    success=False,
-                    error=f"已重复：{exc}",
-                )
-                self.db.add(batch_item)
-                self.db.commit()
-                self.db.refresh(batch_item)
-                results.append(
-                    BatchItemOut(
-                        id=batch_item.id,
+                    if subject_key and generated.segment_d:
+                        self._batch_state.function_codes_by_subject[subject_key].add(
+                            (
+                                normalized_standard_name(generated.standard_name),
+                                generated.segment_d,
+                            )
+                        )
+                    results.append(
+                        BatchItemOut(
+                            id=batch_item.id,
+                            original_name=original_name,
+                            success=True,
+                            standard_name=generated.standard_name,
+                            final_code=generated.final_code,
+                        )
+                    )
+                except CodeConflictError as exc:
+                    batch_item = ProjectBatchItem(
+                        project_id=project.id,
                         original_name=original_name,
                         success=False,
-                        error=batch_item.error,
+                        error=f"已重复：{exc}",
                     )
-                )
-            except Exception as exc:
-                self.db.rollback()
-                batch_item = ProjectBatchItem(
-                    project_id=project.id,
-                    original_name=original_name,
-                    success=False,
-                    error=str(exc),
-                )
-                self.db.add(batch_item)
-                self.db.commit()
-                self.db.refresh(batch_item)
-                results.append(
-                    BatchItemOut(
-                        id=batch_item.id,
+                    self.db.add(batch_item)
+                    self.db.flush()
+                    results.append(
+                        BatchItemOut(
+                            id=batch_item.id,
+                            original_name=original_name,
+                            success=False,
+                            error=batch_item.error,
+                        )
+                    )
+                except Exception as exc:
+                    batch_item = ProjectBatchItem(
+                        project_id=project.id,
                         original_name=original_name,
                         success=False,
                         error=str(exc),
                     )
-                )
-        return results
+                    self.db.add(batch_item)
+                    self.db.flush()
+                    results.append(
+                        BatchItemOut(
+                            id=batch_item.id,
+                            original_name=original_name,
+                            success=False,
+                            error=str(exc),
+                        )
+                    )
+            self.db.commit()
+            return results
+        except BaseException:
+            self.db.rollback()
+            raise
+        finally:
+            self._batch_state = None
 
     def persist_preview(
         self,
@@ -316,6 +421,14 @@ class CodeService:
         return record
 
     def reserve_code(self, project_id: int, final_code: str) -> CodeReservation:
+        if self._batch_state is not None:
+            if final_code in self._batch_state.unavailable_codes:
+                raise CodeConflictError(f"编码 {final_code} 已被全局占用")
+            reservation = CodeReservation(final_code=final_code, project_id=project_id)
+            self.db.add(reservation)
+            self.db.flush()
+            return reservation
+
         existing = self.db.get(CodeReservation, final_code)
         if existing:
             raise CodeConflictError(f"编码 {final_code} 已被全局占用")

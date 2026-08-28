@@ -680,6 +680,69 @@ button {
   background: #fff;
 }
 
+.subject-name-picker {
+  position: relative;
+}
+
+.subject-name-options {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: grid;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 14px 32px rgba(23, 50, 77, 0.14);
+}
+
+.subject-name-options button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+}
+
+.subject-name-options button:last-of-type {
+  border-bottom: 0;
+}
+
+.subject-name-options button:hover,
+.subject-name-options button:focus-visible {
+  background: #f2f6f3;
+}
+
+.subject-name-options button span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.subject-name-options button small {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: #526579;
+  background: #edf2f7;
+  font-size: 11px;
+}
+
+.subject-name-empty {
+  padding: 18px 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
 .merged-file-name {
   display: flex;
   align-items: baseline;

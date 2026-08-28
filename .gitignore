@@ -10,8 +10,11 @@
 __pycache__/
 *.py[cod]
 *.db
+*.db-wal
+*.db-shm
 *.sqlite3
 *.tsbuildinfo
+.vite/
 .coverage
 backend/.venv/
 backend/.venv-win/

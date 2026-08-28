@@ -20,6 +20,7 @@ const projectQuery = ref("");
 const projectOptionsVisible = ref(false);
 const projectPicker = ref<HTMLElement | null>(null);
 const productName = ref("");
+const subjectOptionsVisible = ref(false);
 const stageName = ref("");
 const fileType = ref("");
 const searchedFileName = ref("");
@@ -44,6 +45,36 @@ const filteredProjects = computed(() => {
       project.project_code.toLocaleLowerCase().includes(query) ||
       project.project_name.toLocaleLowerCase().includes(query)
   );
+});
+
+type SubjectOption = { name: string; category: "产品" | "板卡" | "软件" };
+
+const subjectOptions = computed<SubjectOption[]>(() => {
+  if (!selectedProject.value) return [];
+  return [
+    ...selectedProject.value.product_names.map((name) => ({
+      name,
+      category: "产品" as const
+    })),
+    ...selectedProject.value.board_names.map((name) => ({
+      name,
+      category: "板卡" as const
+    })),
+    ...selectedProject.value.software_names.map((name) => ({
+      name,
+      category: "软件" as const
+    }))
+  ];
+});
+
+const filteredSubjectOptions = computed(() => {
+  const query = productName.value.trim().toLocaleLowerCase();
+  const options = query
+    ? subjectOptions.value.filter((option) =>
+        option.name.toLocaleLowerCase().includes(query)
+      )
+    : subjectOptions.value;
+  return options.slice(0, 50);
 });
 
 const mergedFileName = computed(() =>
@@ -125,6 +156,24 @@ function onFileSegmentChange(): void {
   }
 }
 
+function onSubjectNameChange(): void {
+  subjectOptionsVisible.value = true;
+  onFileSegmentChange();
+}
+
+function selectSubjectName(option: SubjectOption): void {
+  productName.value = option.name;
+  subjectOptionsVisible.value = false;
+  onFileSegmentChange();
+}
+
+function onSubjectPickerFocusOut(event: FocusEvent): void {
+  const picker = event.currentTarget as HTMLElement;
+  const nextTarget = event.relatedTarget;
+  if (nextTarget instanceof Node && picker.contains(nextTarget)) return;
+  subjectOptionsVisible.value = false;
+}
+
 function onProjectPickerFocusOut(event: FocusEvent): void {
   const picker = event.currentTarget as HTMLElement;
   const nextTarget = event.relatedTarget;
@@ -150,6 +199,8 @@ function selectProject(project: Project): void {
     resetResults();
   }
   selectedProjectId.value = project.id;
+  productName.value = "";
+  subjectOptionsVisible.value = false;
   projectQuery.value = "";
   projectOptionsVisible.value = false;
 }
@@ -158,6 +209,8 @@ function clearSelectedProject(): void {
   selectedProjectId.value = null;
   projectQuery.value = "";
   projectOptionsVisible.value = false;
+  productName.value = "";
+  subjectOptionsVisible.value = false;
   resetResults();
 }
 
@@ -397,14 +450,41 @@ async function copyApprovedReview(review: NameReview): Promise<void> {
               产品/部组件
               <small>（如主控板、智能控制设备）</small>
             </span>
-            <van-field
-              v-model="productName"
-              placeholder="请输入产品或部组件"
-              maxlength="256"
-              clearable
-              @update:model-value="onFileSegmentChange"
-              @keyup.enter="search"
-            />
+            <div
+              class="subject-name-picker"
+              @focusout="onSubjectPickerFocusOut"
+            >
+              <van-field
+                v-model="productName"
+                placeholder="请优先选择弹出名称"
+                maxlength="256"
+                clearable
+                autocomplete="off"
+                @focus="subjectOptionsVisible = true"
+                @update:model-value="onSubjectNameChange"
+                @keyup.enter="search"
+              />
+              <div
+                v-if="subjectOptionsVisible && subjectOptions.length"
+                class="subject-name-options"
+              >
+                <button
+                  v-for="option in filteredSubjectOptions"
+                  :key="`${option.category}:${option.name}`"
+                  type="button"
+                  @click="selectSubjectName(option)"
+                >
+                  <span>{{ option.name }}</span>
+                  <small>{{ option.category }}</small>
+                </button>
+                <div
+                  v-if="!filteredSubjectOptions.length"
+                  class="subject-name-empty"
+                >
+                  未找到匹配名称，可继续手工输入
+                </div>
+              </div>
+            </div>
           </label>
           <label class="file-segment-field">
             <span>
