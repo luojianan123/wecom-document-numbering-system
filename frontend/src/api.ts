@@ -399,11 +399,12 @@ export function createComponentProject(
 
 export function generateComponentTree(
   projectCode: string,
-  nodes: ComponentDraftNode[]
+  nodes: ComponentDraftNode[],
+  productType: "machine" | "structure" | "hardware"
 ): Promise<ComponentProject> {
   return request<ComponentProject>("/api/component-codes/projects/tree/generate", {
     method: "POST",
-    body: JSON.stringify({ project_code: projectCode, nodes })
+    body: JSON.stringify({ project_code: projectCode, product_type: productType, nodes })
   });
 }
 

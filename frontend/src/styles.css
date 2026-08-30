@@ -1661,6 +1661,17 @@ td code {
 .component-search-row, .component-workbar, .component-workbar > div,
 .component-saved-detail > div, .component-generate-bar { display: flex; align-items: center; gap: 12px; }
 .component-search-row .van-cell { flex: 1; border: 1px solid var(--line); }
+.component-product-type-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.component-product-type-option { display: grid; gap: 5px; min-height: 82px; padding: 13px 14px; border: 1px solid var(--line); background: #f7f9f7; cursor: pointer; }
+.component-product-type-option.active { border-color: var(--green); background: #edf5f1; box-shadow: inset 0 0 0 1px var(--green); }
+.component-product-type-option input { position: absolute; opacity: 0; pointer-events: none; }
+.component-product-type-option strong { color: var(--ink); font-size: 14px; }
+.component-product-type-option span { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.component-type-step .section-heading { align-items: center; }
+.component-step-back { padding: 7px 10px; border: 1px solid var(--line); color: var(--muted); background: transparent; font-size: 12px; cursor: pointer; }
+.component-step-back:hover { border-color: var(--green); color: var(--green); }
+.component-existing-type-note { margin: 0 0 16px; padding: 10px 12px; color: #785518; background: #fff8e8; font-size: 13px; line-height: 1.6; }
+.component-enter-workspace { margin-top: 18px; }
 .component-workbar { min-height: 58px; justify-content: space-between; padding: 10px 16px; color: white; background: var(--ink); }
 .component-workbar > div { min-width: 0; }
 .component-workbar strong { font-family: monospace; font-size: 20px; }
@@ -1810,6 +1821,7 @@ td code {
   .admin-project-search { align-items: stretch; flex-direction: column; gap: 8px; }
   .component-code-page { padding-bottom: 92px; }
   .component-workbar { align-items: stretch; flex-direction: column; }
+  .component-product-type-picker { grid-template-columns: 1fr; }
   .component-workbar > div { justify-content: space-between; }
   .component-workspace { height: auto; min-height: 0; grid-template-columns: 1fr; }
   .component-tree-pane { max-height: 260px; border-right: 0; border-bottom: 1px solid var(--line); }

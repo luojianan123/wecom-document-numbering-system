@@ -124,6 +124,8 @@ export type ComponentKind =
   | "other"
   | "part";
 
+export type ComponentProductType = "machine" | "structure" | "hardware";
+
 export interface ComponentNode {
   id: number;
   component_project_id: number;
@@ -140,6 +142,7 @@ export interface ComponentNode {
 export interface ComponentProject {
   id: number;
   project_code: string;
+  product_type: ComponentProductType;
   status: string;
   created_at: string;
   created_by_name: string;
@@ -149,6 +152,7 @@ export interface ComponentProject {
 export interface ComponentProjectSummary {
   id: number;
   project_code: string;
+  product_type: ComponentProductType;
   status: string;
   created_at: string;
   created_by_name: string;

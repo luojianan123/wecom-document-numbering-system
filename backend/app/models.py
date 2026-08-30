@@ -238,6 +238,7 @@ class ComponentProject(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_code: Mapped[str] = mapped_column(String(4), unique=True, index=True)
+    product_type: Mapped[str] = mapped_column(String(16), default="machine")
     status: Mapped[str] = mapped_column(String(16), default="active")
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

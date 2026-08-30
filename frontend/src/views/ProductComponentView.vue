@@ -7,7 +7,7 @@ import {
   updateComponentNode
 } from "../api";
 import AppHeader from "../components/AppHeader.vue";
-import type { ComponentDraftNode, ComponentKind, ComponentNode, ComponentProject } from "../types";
+import type { ComponentDraftNode, ComponentKind, ComponentNode, ComponentProductType, ComponentProject } from "../types";
 
 type WorkNode = {
   key: string; parentKey: string | null; kind: ComponentKind; name: string;
@@ -16,8 +16,10 @@ type WorkNode = {
 };
 
 const projectCode = ref("");
+const productType = ref<ComponentProductType>("machine");
 const project = ref<ComponentProject | null>(null);
 const searched = ref(false);
+const choosingProductType = ref(false);
 const loading = ref(false);
 const saving = ref(false);
 const drafts = ref<ComponentDraftNode[]>([]);
@@ -34,6 +36,16 @@ const labels: Record<ComponentKind, string> = {
 };
 const kindOrder: Record<ComponentKind, number> = {
   machine: 0, component: 1, structure: 2, hardware: 3, software: 4, other: 5, part: 6
+};
+const productTypeOptions = [
+  { value: "machine", label: "整机", description: "保留整机层级，按现有编号形式编制" },
+  { value: "structure", label: "结构件", description: "去掉整机，从部组件开始编制结构" },
+  { value: "hardware", label: "单板卡", description: "去掉整机，从部组件开始编制板卡" }
+] as const;
+const structureSuggestions: Record<string, string[]> = {
+  "机箱": ["前面板", "后面板", "上盖板", "下盖板", "左侧板", "右侧板"],
+  "VPX机箱": ["前面板", "后面板", "上盖板", "下盖板", "左侧板", "右侧板", "上导轨", "下导轨"],
+  "冷板": ["中框", "上盖板", "下盖板"]
 };
 const stageOptions = [
   { value: "C", label: "初样件/电性件" },
@@ -76,6 +88,8 @@ const selected = computed(() => allNodes.value.find((node) => node.key === selec
 const childKinds = computed<ComponentKind[]>(() => {
   if (!selected.value) return [];
   if (selected.value.kind === "machine") return ["component"];
+  if (selected.value.kind === "component" && productType.value === "structure") return ["structure"];
+  if (selected.value.kind === "component" && productType.value === "hardware") return ["hardware"];
   if (selected.value.kind === "component") return ["structure", "hardware", "software", "other"];
   if (["structure", "hardware"].includes(selected.value.kind)) return ["part"];
   return [];
@@ -95,18 +109,44 @@ async function addDraft(kind: ComponentKind, parent: WorkNode | null = selected.
   await nextTick();
   document.querySelector<HTMLInputElement>(".component-editor-name input")?.focus();
 }
+function onDraftNameChange(draft: ComponentDraftNode): void {
+  if (draft.kind !== "component" || productType.value === "hardware") return;
+  const suggestions = structureSuggestions[draft.name.trim()];
+  if (!suggestions?.length) return;
+  const existingNames = new Set(
+    allNodes.value
+      .filter((node) => node.parentKey === draftKey(draft.client_id) && node.kind === "structure")
+      .map((node) => node.name.trim())
+  );
+  const newDrafts = suggestions
+    .filter((name) => !existingNames.has(name))
+    .map((name) => ({ ...makeDraft("structure", allNodes.value.find((node) => node.key === draftKey(draft.client_id)) ?? null), name }));
+  if (!newDrafts.length) return;
+  drafts.value.push(...newDrafts);
+  showToast(`已自动添加${newDrafts.length}个结构，可继续修改或删除`);
+}
 async function searchProject(): Promise<void> {
   const code = projectCode.value.trim();
   if (!/^\d{4}$/.test(code)) { showToast("请输入4位项目号"); return; }
-  loading.value = true; searched.value = true; project.value = null; drafts.value = []; selectedKey.value = null; needsRenumber.value = false;
+  loading.value = true; project.value = null; drafts.value = []; selectedKey.value = null; needsRenumber.value = false;
   try {
     project.value = await getComponentProject(code);
-    const first = project.value.nodes.find((node) => node.kind === "machine");
-    selectedKey.value = first ? savedKey(first.id) : null;
+    productType.value = project.value.product_type;
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) errorMessage(error);
-    else await addDraft("machine", null);
+    else productType.value = "machine";
   } finally { loading.value = false; }
+  choosingProductType.value = true;
+}
+async function enterWorkspace(): Promise<void> {
+  choosingProductType.value = false;
+  searched.value = true;
+  if (project.value) {
+    const first = project.value.nodes.find((node) => node.parent_id === null);
+    selectedKey.value = first ? savedKey(first.id) : null;
+    return;
+  }
+  await addDraft(productType.value === "machine" ? "machine" : "component", null);
 }
 function selectNode(node: WorkNode): void { selectedKey.value = node.key; editingSaved.value = false; }
 function removeDraft(root: ComponentDraftNode): void {
@@ -125,7 +165,7 @@ async function generateAll(): Promise<void> {
   saving.value = true;
   try {
     if (drafts.value.length) {
-      project.value = await generateComponentTree(projectCode.value.trim(), drafts.value);
+      project.value = await generateComponentTree(projectCode.value.trim(), drafts.value, productType.value);
     }
     if (needsRenumber.value && project.value) {
       project.value = await renumberComponentProject(project.value.id);
@@ -182,24 +222,37 @@ async function exportExcel(): Promise<void> {
     URL.revokeObjectURL(url);
   } catch (error) { errorMessage(error); }
 }
-function resetSearch(): void { searched.value = false; project.value = null; drafts.value = []; selectedKey.value = null; needsRenumber.value = false; }
+function resetSearch(): void { searched.value = false; choosingProductType.value = false; project.value = null; drafts.value = []; selectedKey.value = null; needsRenumber.value = false; productType.value = "machine"; }
+function backToProjectSearch(): void { choosingProductType.value = false; project.value = null; productType.value = "machine"; }
 </script>
 
 <template>
   <main class="app-page"><div class="page-wrap wide component-code-page">
     <AppHeader eyebrow="产品组件编码" title="产品组件层级编制" />
-    <section v-if="!searched" class="panel component-project-search">
+    <section v-if="!searched && !choosingProductType" class="panel component-project-search">
       <div class="section-heading"><div><p class="eyebrow">开始编制</p><h2>输入4位项目号</h2></div></div>
       <div class="component-search-row"><van-field v-model="projectCode" placeholder="例如：2468" maxlength="4" />
         <van-button color="#17324d" :loading="loading" @click="searchProject">进入项目</van-button></div>
     </section>
+    <section v-else-if="!searched && choosingProductType" class="panel component-project-search component-type-step">
+      <div class="section-heading"><div><p class="eyebrow">项目 {{ projectCode }}</p><h2>选择产品组成类型</h2></div>
+        <button type="button" class="component-step-back" @click="backToProjectSearch">返回修改项目号</button></div>
+      <p v-if="project" class="component-existing-type-note">该项目已有产品组成编号，类型已固定为“{{ productTypeOptions.find((item) => item.value === productType)?.label }}”。</p>
+      <div class="component-product-type-picker">
+        <label v-for="option in productTypeOptions" :key="option.value" :class="['component-product-type-option', { active: productType === option.value }]">
+          <input v-model="productType" type="radio" name="component-product-type" :value="option.value" :disabled="!!project && productType !== option.value" />
+          <strong>{{ option.label }}</strong><span>{{ option.description }}</span>
+        </label>
+      </div>
+      <van-button block color="#17324d" size="large" class="component-enter-workspace" @click="enterWorkspace">进入填写</van-button>
+    </section>
     <template v-else>
       <section class="component-workbar">
         <div><button type="button" class="component-back-button" title="更换项目" @click="resetSearch">‹</button>
-          <strong>{{ projectCode }}</strong><span>{{ project ? "已有编码" : "新项目" }}</span></div>
+          <strong>{{ projectCode }}</strong><span>{{ productTypeOptions.find((item) => item.value === productType)?.label }} · {{ project ? "已有编码" : "新项目" }}</span></div>
         <div class="component-workbar-actions">
           <button type="button" :disabled="!project?.nodes.length" @click="exportExcel">导出 Excel 表</button>
-          <button type="button" @click="addDraft('machine', null)">增加整机</button>
+          <button v-if="productType === 'machine'" type="button" @click="addDraft('machine', null)">增加整机</button>
         </div>
       </section>
       <section class="component-workspace">
@@ -224,7 +277,7 @@ function resetSearch(): void { searched.value = false; project.value = null; dra
             <header><div><p class="eyebrow">当前节点</p><h2>{{ labels[selected.kind] }}</h2></div>
               <span :class="['component-node-state', { draft: !selected.saved }]">{{ selected.saved ? "已生成" : "草稿" }}</span></header>
             <div v-if="selected.draft" class="component-editor-form">
-              <label>名称</label><van-field v-model="selected.draft.name" class="component-editor-name" :placeholder="`请输入${labels[selected.kind]}名称`" maxlength="256" />
+              <label>名称</label><van-field v-model="selected.draft.name" class="component-editor-name" :placeholder="`请输入${labels[selected.kind]}名称`" maxlength="256" @update:model-value="onDraftNameChange(selected.draft)" />
               <label>研制阶段</label><van-radio-group v-model="selected.draft.stage" direction="horizontal">
                 <label v-for="option in stageOptions" :key="option.value" class="component-stage-check">
                   <input v-model="selected.draft.stage" type="radio" name="component-stage" :value="option.value" />
@@ -254,7 +307,7 @@ function resetSearch(): void { searched.value = false; project.value = null; dra
             </div>
             <div v-else class="component-leaf-note">该节点是当前规则下的末级，无需继续填写。</div>
           </template>
-          <div v-else class="component-empty-editor"><strong>先增加一台整机</strong><p>完整填写所有层级后，再统一生成编码。</p></div>
+          <div v-else class="component-empty-editor"><strong>先增加{{ productType === 'machine' ? '一台整机' : '一个部组件' }}</strong><p>完整填写所有层级后，再统一生成编码。</p></div>
         </section>
       </section>
       <footer class="component-generate-bar">

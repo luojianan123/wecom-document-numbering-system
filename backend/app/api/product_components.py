@@ -27,6 +27,7 @@ from ..security import CurrentSession, require_admin, require_csrf, require_user
 from ..services.product_components import (
     ComponentNumberingError,
     build_child_code,
+    build_component_root_code,
     build_machine_code,
     kind_label,
     rebuild_code_suffix,
@@ -71,6 +72,7 @@ def _project_out(db: Session, project: ComponentProject) -> ComponentProjectOut:
     return ComponentProjectOut(
         id=project.id,
         project_code=project.project_code,
+        product_type=project.product_type,
         status=project.status,
         created_at=project.created_at,
         created_by_name=project.created_by.name if project.created_by else "未知用户",
@@ -125,6 +127,8 @@ def _create_draft_node(
     stage = stage_code(payload.stage, payload.is_prototype)
     name = payload.name.strip()
     if payload.kind == "machine":
+        if project.product_type != "machine":
+            raise ComponentNumberingError("纯结构件或纯板卡项目不能增加整机")
         if parent is not None:
             raise ComponentNumberingError("整机不能设置上级")
         if db.scalar(
@@ -137,6 +141,20 @@ def _create_draft_node(
             raise ComponentNumberingError(f"整机名称“{name}”已存在")
         code = build_machine_code(project.project_code, name, stage)
         sequence = 0
+    elif (
+        payload.kind == "component"
+        and parent is None
+        and project.product_type in {"structure", "hardware"}
+    ):
+        if db.scalar(
+            select(ComponentNode).where(
+                ComponentNode.component_project_id == project.id,
+                ComponentNode.parent_id.is_(None),
+            )
+        ):
+            raise ComponentNumberingError("该项目的部组件根节点已存在")
+        code = build_component_root_code(project.project_code, stage)
+        sequence = 1
     else:
         if parent is None:
             raise ComponentNumberingError(f"{kind_label(payload.kind)}必须设置上级")
@@ -241,6 +259,7 @@ def list_admin_projects(
             ComponentProjectSummaryOut(
                 id=project.id,
                 project_code=project.project_code,
+                product_type=project.product_type,
                 status=project.status,
                 created_at=project.created_at,
                 created_by_name=project.created_by.name if project.created_by else "未知用户",
@@ -281,23 +300,32 @@ def create_project(
         raise HTTPException(status_code=409, detail="该项目号已存在产品组件编码")
     project = ComponentProject(
         project_code=payload.project_code,
+        product_type=payload.product_type,
         status="active",
         created_by_id=user.id,
     )
     db.add(project)
     db.flush()
+    if not payload.machine_name:
+        raise HTTPException(status_code=400, detail="创建项目时必须填写产品组成名称")
     stage = stage_code(payload.stage, payload.is_prototype)
-    machine = ComponentNode(
+    root_kind = "machine" if payload.product_type == "machine" else "component"
+    root_code = (
+        build_machine_code(payload.project_code, payload.machine_name, stage)
+        if root_kind == "machine"
+        else build_component_root_code(payload.project_code, stage)
+    )
+    root = ComponentNode(
         component_project_id=project.id,
         parent_id=None,
-        kind="machine",
+        kind=root_kind,
         name=payload.machine_name.strip(),
-        code=build_machine_code(payload.project_code, payload.machine_name, stage),
+        code=root_code,
         stage=stage,
-        sequence=0,
+        sequence=0 if root_kind == "machine" else 1,
         created_by_id=user.id,
     )
-    db.add(machine)
+    db.add(root)
     try:
         db.commit()
     except IntegrityError as exc:
@@ -322,11 +350,14 @@ def generate_component_tree(
     if not project:
         project = ComponentProject(
             project_code=payload.project_code,
+            product_type=payload.product_type,
             status="active",
             created_by_id=user.id,
         )
         db.add(project)
         db.flush()
+    elif project.product_type != payload.product_type:
+        raise HTTPException(status_code=409, detail="该项目的产品组成类型与当前选择不一致")
 
     client_ids = [item.client_id for item in payload.nodes]
     if len(client_ids) != len(set(client_ids)):
@@ -376,6 +407,8 @@ def add_machine(
     db: Session = Depends(get_db),
 ) -> ComponentNodeOut:
     project = _get_project(db, project_id)
+    if project.product_type != "machine":
+        raise HTTPException(status_code=400, detail="纯结构件或纯板卡项目不能增加整机")
     if db.scalar(
         select(ComponentNode).where(
             ComponentNode.component_project_id == project.id,
@@ -507,7 +540,7 @@ def renumber_project(
     db: Session = Depends(get_db),
 ) -> ComponentProjectOut:
     project = _get_project(db, project_id)
-    machines = list(
+    roots = list(
         db.scalars(
             select(ComponentNode)
             .where(
@@ -518,7 +551,7 @@ def renumber_project(
         )
     )
     try:
-        _renumber_tree(db, machines)
+        _renumber_tree(db, roots)
         db.commit()
     except (ComponentNumberingError, IntegrityError) as exc:
         db.rollback()
@@ -567,14 +600,20 @@ def export_project(
     )
     workbook = Workbook()
     workbook.remove(workbook.active)
-    machines = [node for node in nodes if node.parent_id is None]
-    if not machines:
-        raise HTTPException(status_code=400, detail="该项目没有可导出的整机")
+    roots = [node for node in nodes if node.parent_id is None]
+    if not roots:
+        raise HTTPException(status_code=400, detail="该项目没有可导出的产品组成")
+    headers = (
+        ["整机", "部组件", "结构/硬件/软件/其他", "零件"]
+        if project.product_type == "machine"
+        else ["部组件", "结构/硬件", "零件"]
+    )
+    column_count = len(headers) * 3
     used_titles: set[str] = set()
-    for machine_index, machine in enumerate(machines, start=1):
+    for root_index, root in enumerate(roots, start=1):
         # Excel 工作表名称最多 31 个字符，且不能包含这些特殊字符。
-        title = "".join("_" if char in r"[]:*?/\\" else char for char in machine.name).strip()
-        title = title[:31] or f"整机{machine_index}"
+        title = "".join("_" if char in r"[]:*?/\\" else char for char in root.name).strip()
+        title = title[:31] or f"产品组成{root_index}"
         base_title = title
         suffix = 2
         while title in used_titles:
@@ -584,11 +623,15 @@ def export_project(
         used_titles.add(title)
         sheet = workbook.create_sheet(title)
         sheet.append([f"项目号：{project.project_code}"])
-        sheet.merge_cells("A1:L1")
-        sheet.append(["整机", "", "", "部组件", "", "", "结构/硬件/软件/其他", "", "", "零件", "", ""])
-        for start, end in (("A2", "C2"), ("D2", "F2"), ("G2", "I2"), ("J2", "L2")):
-            sheet.merge_cells(f"{start}:{end}")
-        sheet.append(["名称", "编号", "阶段"] * 4)
+        sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=column_count)
+        heading_row: list[str] = []
+        for heading in headers:
+            heading_row.extend([heading, "", ""])
+        sheet.append(heading_row)
+        for index in range(len(headers)):
+            start = index * 3 + 1
+            sheet.merge_cells(start_row=2, start_column=start, end_row=2, end_column=start + 2)
+        sheet.append(["名称", "编号", "阶段"] * len(headers))
 
         children: dict[int, list[ComponentNode]] = {}
         for node in nodes:
@@ -597,7 +640,11 @@ def export_project(
         for child_nodes in children.values():
             child_nodes.sort(key=lambda item: (item.sequence, item.id))
 
-        def append_branch(path: list[ComponentNode]) -> None:
+        def append_branch(
+            path: list[ComponentNode],
+            current_sheet=sheet,
+            current_children=children,
+        ) -> None:
             row: list[str] = []
             for node in path:
                 row.extend([
@@ -605,13 +652,13 @@ def export_project(
                     node.code,
                     "正样件" if node.stage == "Z" else "其他",
                 ])
-            row.extend([""] * (12 - len(row)))
-            sheet.append(row)
-            for child in children.get(path[-1].id, []):
+            row.extend([""] * (column_count - len(row)))
+            current_sheet.append(row)
+            for child in current_children.get(path[-1].id, []):
                 append_branch(path + [child])
 
-        append_branch([machine])
-        for column in range(1, 13):
+        append_branch([root])
+        for column in range(1, column_count + 1):
             sheet.column_dimensions[chr(64 + column)].width = 30 if column % 3 != 3 else 12
         sheet.freeze_panes = "A4"
     content = BytesIO()

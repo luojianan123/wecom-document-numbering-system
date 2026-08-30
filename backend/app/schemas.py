@@ -192,6 +192,7 @@ class ComponentNodeOut(BaseModel):
 class ComponentProjectOut(BaseModel):
     id: int
     project_code: str
+    product_type: Literal["machine", "structure", "hardware"]
     status: str
     created_at: datetime
     created_by_name: str
@@ -201,6 +202,7 @@ class ComponentProjectOut(BaseModel):
 class ComponentProjectSummaryOut(BaseModel):
     id: int
     project_code: str
+    product_type: Literal["machine", "structure", "hardware"]
     status: str
     created_at: datetime
     created_by_name: str
@@ -211,7 +213,8 @@ class ComponentProjectSummaryOut(BaseModel):
 
 class ComponentProjectCreateIn(BaseModel):
     project_code: str = Field(pattern=r"^\d{4}$")
-    machine_name: str = Field(min_length=1, max_length=256)
+    machine_name: str | None = Field(default=None, min_length=1, max_length=256)
+    product_type: Literal["machine", "structure", "hardware"] = "machine"
     is_prototype: bool = False
     stage: Literal["C", "M", "Z", "G"] | None = None
 
@@ -251,4 +254,5 @@ class ComponentDraftNodeIn(BaseModel):
 
 class ComponentTreeGenerateIn(BaseModel):
     project_code: str = Field(pattern=r"^\d{4}$")
+    product_type: Literal["machine", "structure", "hardware"] = "machine"
     nodes: list[ComponentDraftNodeIn] = Field(min_length=1, max_length=2_000)

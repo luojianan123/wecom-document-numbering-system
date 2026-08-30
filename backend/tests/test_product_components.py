@@ -551,3 +551,59 @@ def test_invalid_component_tree_rolls_back_entire_batch(client: TestClient) -> N
     assert invalid.status_code == 400
     assert client.get("/api/component-codes/projects/9754").status_code == 404
 
+
+def test_pure_structure_project_starts_at_component_without_machine(client: TestClient) -> None:
+    csrf = login(client, "user", "pure-structure")
+    generated = client.post(
+        "/api/component-codes/projects/tree/generate",
+        json={
+            "project_code": "2460",
+            "product_type": "structure",
+            "nodes": [
+                {"client_id": "component", "kind": "component", "name": "结构部组件"},
+                {
+                    "client_id": "structure",
+                    "parent_client_id": "component",
+                    "kind": "structure",
+                    "name": "机箱结构",
+                },
+            ],
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert generated.status_code == 200, generated.text
+    body = generated.json()
+    assert body["product_type"] == "structure"
+    codes = {node["kind"]: node["code"] for node in body["nodes"]}
+    assert codes == {
+        "component": "GH2460-01-00-G-1.00",
+        "structure": "GH2460-01-01-G-1.00",
+    }
+
+
+def test_pure_hardware_project_starts_at_component_without_machine(client: TestClient) -> None:
+    csrf = login(client, "user", "pure-hardware")
+    generated = client.post(
+        "/api/component-codes/projects/tree/generate",
+        json={
+            "project_code": "2461",
+            "product_type": "hardware",
+            "nodes": [
+                {"client_id": "component", "kind": "component", "name": "板卡部组件"},
+                {
+                    "client_id": "hardware",
+                    "parent_client_id": "component",
+                    "kind": "hardware",
+                    "name": "主控板",
+                },
+            ],
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert generated.status_code == 200, generated.text
+    codes = {node["kind"]: node["code"] for node in generated.json()["nodes"]}
+    assert codes == {
+        "component": "GH2461-01-00-G-1.00",
+        "hardware": "GH2461-01-10-G-1.00",
+    }
+

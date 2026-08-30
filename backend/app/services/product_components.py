@@ -65,11 +65,18 @@ def validate_node_code(
         )
         sequence = 0
     elif node.kind == "component":
-        pattern = (
-            rf"^GH{re.escape(project_code)}-[A-Z]{{1,6}}-\d{{2}}-00-"
-            rf"(?P<stage>[CMZG])-(?P<version>[12]\.00)$"
-        )
-        sequence = int(parts[2]) if len(parts) == 6 and parts[2].isdigit() else -1
+        if parent is None:
+            pattern = (
+                rf"^GH{re.escape(project_code)}-(?P<sequence>\d{{2}})-00-"
+                rf"(?P<stage>[CMZG])-(?P<version>[12]\.00)$"
+            )
+            sequence = int(parts[1]) if len(parts) == 5 and parts[1].isdigit() else -1
+        else:
+            pattern = (
+                rf"^GH{re.escape(project_code)}-[A-Z]{{1,6}}-\d{{2}}-00-"
+                rf"(?P<stage>[CMZG])-(?P<version>[12]\.00)$"
+            )
+            sequence = int(parts[2]) if len(parts) == 6 and parts[2].isdigit() else -1
     elif node.kind in {"structure", "hardware", "other"}:
         pattern = (
             rf"^GH{re.escape(project_code)}-[A-Z]{{1,6}}-\d{{2}}-\d{{2}}-"
@@ -130,6 +137,10 @@ def rebuild_code_suffix(node: ComponentNode) -> str:
 
 def build_machine_code(project_code: str, name: str, stage: str) -> str:
     return f"GH{project_code}-{machine_abbreviation(name)}-00-{stage}-{version_code(stage)}"
+
+
+def build_component_root_code(project_code: str, stage: str) -> str:
+    return f"GH{project_code}-01-00-{stage}-{version_code(stage)}"
 
 
 def build_child_code(parent: ComponentNode, kind: str, sequence: int, stage: str) -> str:
