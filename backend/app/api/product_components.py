@@ -4,6 +4,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -37,6 +39,13 @@ from ..services.product_components import (
 )
 
 router = APIRouter(prefix="/api/component-codes", tags=["产品组件编码"])
+
+COMPONENT_STAGE_LABELS = {
+    "C": "初样件/电性件",
+    "M": "模样件",
+    "Z": "正样件",
+    "G": "其他",
+}
 
 
 def _node_out(node: ComponentNode) -> ComponentNodeOut:
@@ -608,7 +617,7 @@ def export_project(
         if project.product_type == "machine"
         else ["部组件", "结构/硬件", "零件"]
     )
-    column_count = len(headers) * 3
+    column_count = len(headers)
     used_titles: set[str] = set()
     for root_index, root in enumerate(roots, start=1):
         # Excel 工作表名称最多 31 个字符，且不能包含这些特殊字符。
@@ -624,14 +633,7 @@ def export_project(
         sheet = workbook.create_sheet(title)
         sheet.append([f"项目号：{project.project_code}"])
         sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=column_count)
-        heading_row: list[str] = []
-        for heading in headers:
-            heading_row.extend([heading, "", ""])
-        sheet.append(heading_row)
-        for index in range(len(headers)):
-            start = index * 3 + 1
-            sheet.merge_cells(start_row=2, start_column=start, end_row=2, end_column=start + 2)
-        sheet.append(["名称", "编号", "阶段"] * len(headers))
+        sheet.append(headers)
 
         children: dict[int, list[ComponentNode]] = {}
         for node in nodes:
@@ -640,27 +642,79 @@ def export_project(
         for child_nodes in children.values():
             child_nodes.sort(key=lambda item: (item.sequence, item.id))
 
-        def append_branch(
-            path: list[ComponentNode],
-            current_sheet=sheet,
-            current_children=children,
-        ) -> None:
-            row: list[str] = []
-            for node in path:
-                row.extend([
-                    node.name,
-                    node.code,
-                    "正样件" if node.stage == "Z" else "其他",
-                ])
-            row.extend([""] * (column_count - len(row)))
-            current_sheet.append(row)
-            for child in current_children.get(path[-1].id, []):
-                append_branch(path + [child])
+        paths: list[list[ComponentNode]] = []
 
-        append_branch([root])
+        def collect_paths(
+            path: list[ComponentNode],
+            current_children=children,
+            current_paths=paths,
+        ) -> None:
+            descendants = current_children.get(path[-1].id, [])
+            if not descendants:
+                current_paths.append(path)
+                return
+            for child in descendants:
+                collect_paths(path + [child])
+
+        collect_paths([root])
+        first_data_row = 3
+        for path in paths:
+            row = [
+                f"{node.name}\n{node.code}\n{COMPONENT_STAGE_LABELS.get(node.stage, node.stage)}"
+                for node in path
+            ]
+            sheet.append([*row, *([""] * (column_count - len(row)))])
+
+        # Merge each parent across all contiguous leaf rows in its own branch.
+        for column_index in range(column_count):
+            start_index = 0
+            while start_index < len(paths):
+                if column_index >= len(paths[start_index]):
+                    start_index += 1
+                    continue
+                node_id = paths[start_index][column_index].id
+                end_index = start_index
+                while (
+                    end_index + 1 < len(paths)
+                    and column_index < len(paths[end_index + 1])
+                    and paths[end_index + 1][column_index].id == node_id
+                ):
+                    end_index += 1
+                if end_index > start_index:
+                    sheet.merge_cells(
+                        start_row=first_data_row + start_index,
+                        start_column=column_index + 1,
+                        end_row=first_data_row + end_index,
+                        end_column=column_index + 1,
+                    )
+                start_index = end_index + 1
+
+        thin = Side(style="thin", color="C9D4CE")
+        for cell in sheet[1]:
+            cell.font = Font(bold=True, color="17324D", size=12)
+            cell.fill = PatternFill("solid", fgColor="E8F3EE")
+            cell.alignment = Alignment(horizontal="left", vertical="center")
+        for cell in sheet[2]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="17324D")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        for row in sheet.iter_rows(
+            min_row=first_data_row,
+            max_row=first_data_row + len(paths) - 1,
+            min_col=1,
+            max_col=column_count,
+        ):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        sheet.row_dimensions[1].height = 26
+        sheet.row_dimensions[2].height = 26
+        for row_index in range(first_data_row, first_data_row + len(paths)):
+            sheet.row_dimensions[row_index].height = 58
         for column in range(1, column_count + 1):
-            sheet.column_dimensions[chr(64 + column)].width = 30 if column % 3 != 3 else 12
-        sheet.freeze_panes = "A4"
+            sheet.column_dimensions[get_column_letter(column)].width = 38
+        sheet.freeze_panes = "A3"
     content = BytesIO()
     workbook.save(content)
     content.seek(0)

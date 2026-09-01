@@ -584,7 +584,7 @@ async def initialize_project(
     product_names: str = Form(default=""),
     board_names: str = Form(default=""),
     software_names: str = Form(default=""),
-    file: UploadFile = File(),
+    file: UploadFile | None = File(default=None),
     admin: User = Depends(require_admin),
     _: CurrentSession = Depends(require_csrf),
     db: Session = Depends(get_db),
@@ -592,15 +592,17 @@ async def initialize_project(
     existing = db.scalar(select(Project).where(Project.project_code == project_code))
     if existing:
         raise HTTPException(status_code=409, detail="该项目号已存在")
-    try:
-        file_names = parse_file_names(file.filename or "", await file.read())
-    except UploadError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    file_names: list[str] = []
+    if file is not None:
+        try:
+            file_names = parse_file_names(file.filename or "", await file.read())
+        except UploadError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     project = Project(
         project_code=project_code,
         project_name=project_name,
-        status="initializing",
+        status="active" if not file_names else "initializing",
         special_numbering=special_numbering,
         product_names=_parse_subject_names(product_names, "产品"),
         board_names=_parse_subject_names(board_names, "板卡"),
@@ -611,6 +613,14 @@ async def initialize_project(
     db.commit()
     db.refresh(project)
     project_id = project.id
+
+    if not file_names:
+        return ProjectInitOut(
+            project=project,
+            items=[],
+            success_count=0,
+            failure_count=0,
+        )
 
     service = CodeService(
         db,

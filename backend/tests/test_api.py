@@ -1684,3 +1684,38 @@ def test_initializing_project_cannot_be_confirmed_or_modified_but_can_be_deleted
     assert deleted.status_code == 204
     with SessionLocal() as db:
         assert db.get(Project, project_id) is None
+
+
+def test_admin_can_create_active_empty_project_and_user_can_request_code(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin", "empty-project-admin")
+    created = client.post(
+        "/api/admin/projects/init",
+        data={
+            "project_name": "先建库项目",
+            "project_code": "9091",
+            "product_names": "主控设备",
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["project"]["status"] == "active"
+    assert body["items"] == []
+    assert body["success_count"] == 0
+    assert body["failure_count"] == 0
+
+    user_csrf = login(client, "user", "empty-project-user")
+    projects = client.get("/api/projects")
+    assert projects.status_code == 200
+    empty_project = next(item for item in projects.json() if item["project_code"] == "9091")
+    assert empty_project["project_name"] == "先建库项目"
+
+    generated = client.post(
+        "/api/codes/generate",
+        json={"project_id": empty_project["id"], "file_name": "主控设备技术要求"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert generated.status_code == 200, generated.text
+    assert generated.json()["file_code"]["project_id"] == empty_project["id"]

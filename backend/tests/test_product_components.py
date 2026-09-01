@@ -224,9 +224,9 @@ def test_component_edit_claim_export_and_recursive_delete(client: TestClient) ->
     assert workbook.sheetnames == ["测试机"]
     assert rows[0][0] == "项目号：1357"
     assert rows[1][0] == "整机"
-    assert rows[1][3] == "部组件"
-    assert rows[2][:6] == ("名称", "编号", "阶段", "名称", "编号", "阶段")
-    assert any(row[3] == "修正组件" for row in rows)
+    assert rows[1][1] == "部组件"
+    assert rows[2][0].startswith("测试机\nGH1357-CSJ-00-Z-2.00")
+    assert rows[2][1] == "修正组件\nGH1357-CSJ-01-00-G-1.00\n其他"
     workbook.close()
 
     deleted = client.post(
@@ -271,8 +271,76 @@ def test_component_export_uses_one_tree_sheet_per_machine(client: TestClient) ->
     assert workbook.sheetnames == ["甲整机", "乙整机"]
     first_rows = list(workbook["甲整机"].iter_rows(values_only=True))
     second_rows = list(workbook["乙整机"].iter_rows(values_only=True))
-    assert any(row[0] == "甲整机" and row[3] == "甲组件" for row in first_rows)
-    assert any(row[0] == "乙整机" and row[3] == "乙组件" for row in second_rows)
+    assert any(
+        row[0].startswith("甲整机\n") and row[1].startswith("甲组件\n")
+        for row in first_rows
+    )
+    assert any(
+        row[0].startswith("乙整机\n") and row[1].startswith("乙组件\n")
+        for row in second_rows
+    )
+    workbook.close()
+
+
+def test_component_export_merges_each_parent_over_its_descendant_rows(
+    client: TestClient,
+) -> None:
+    csrf = login(client, "user", "component-export-tree")
+    project = client.post(
+        "/api/component-codes/projects/tree/generate",
+        json={
+            "project_code": "3580",
+            "nodes": [
+                {"client_id": "machine", "kind": "machine", "name": "树形导出机"},
+                {
+                    "client_id": "component-1",
+                    "parent_client_id": "machine",
+                    "kind": "component",
+                    "name": "第一部组件",
+                },
+                {
+                    "client_id": "structure-1",
+                    "parent_client_id": "component-1",
+                    "kind": "structure",
+                    "name": "前面板",
+                },
+                {
+                    "client_id": "structure-2",
+                    "parent_client_id": "component-1",
+                    "kind": "structure",
+                    "name": "后面板",
+                },
+                {
+                    "client_id": "component-2",
+                    "parent_client_id": "machine",
+                    "kind": "component",
+                    "name": "第二部组件",
+                },
+                {
+                    "client_id": "hardware",
+                    "parent_client_id": "component-2",
+                    "kind": "hardware",
+                    "name": "主控板",
+                },
+            ],
+        },
+        headers={"X-CSRF-Token": csrf},
+    ).json()
+
+    exported = client.get(f"/api/component-codes/projects/{project['id']}/export")
+    workbook = load_workbook(BytesIO(exported.content))
+    sheet = workbook["树形导出机"]
+    assert {str(cell_range) for cell_range in sheet.merged_cells.ranges} == {
+        "A1:D1",
+        "A3:A5",
+        "B3:B4",
+    }
+    assert sheet["A3"].value.startswith("树形导出机\n")
+    assert sheet["B3"].value.startswith("第一部组件\n")
+    assert sheet["C3"].value.startswith("前面板\n")
+    assert sheet["C4"].value.startswith("后面板\n")
+    assert sheet["B5"].value.startswith("第二部组件\n")
+    assert sheet["C5"].value.startswith("主控板\n")
     workbook.close()
 
 

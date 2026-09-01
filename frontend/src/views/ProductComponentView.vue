@@ -109,21 +109,39 @@ async function addDraft(kind: ComponentKind, parent: WorkNode | null = selected.
   await nextTick();
   document.querySelector<HTMLInputElement>(".component-editor-name input")?.focus();
 }
-function onDraftNameChange(draft: ComponentDraftNode): void {
-  if (draft.kind !== "component" || productType.value === "hardware") return;
-  const suggestions = structureSuggestions[draft.name.trim()];
+function addAutomaticChildren(parent: WorkNode): void {
+  const name = parent.name.trim();
+  let childKind: ComponentKind;
+  let suggestions: string[] | undefined;
+  let childLabel: string;
+  if (parent.kind === "component" && productType.value !== "hardware") {
+    childKind = "structure";
+    suggestions = structureSuggestions[name];
+    childLabel = "结构";
+  } else if (parent.kind === "hardware" && name.endsWith("板PCBA")) {
+    const prefix = name.slice(0, -"板PCBA".length);
+    childKind = "part";
+    suggestions = [`${prefix}板PCB`, `${prefix}板PCB设计`];
+    childLabel = "零件";
+  } else {
+    return;
+  }
   if (!suggestions?.length) return;
   const existingNames = new Set(
     allNodes.value
-      .filter((node) => node.parentKey === draftKey(draft.client_id) && node.kind === "structure")
+      .filter((node) => node.parentKey === parent.key && node.kind === childKind)
       .map((node) => node.name.trim())
   );
   const newDrafts = suggestions
     .filter((name) => !existingNames.has(name))
-    .map((name) => ({ ...makeDraft("structure", allNodes.value.find((node) => node.key === draftKey(draft.client_id)) ?? null), name }));
+    .map((name) => ({ ...makeDraft(childKind, parent), name }));
   if (!newDrafts.length) return;
   drafts.value.push(...newDrafts);
-  showToast(`已自动添加${newDrafts.length}个结构，可继续修改或删除`);
+  showToast(`已自动添加${newDrafts.length}个${childLabel}，可继续修改或删除`);
+}
+function onDraftNameChange(draft: ComponentDraftNode): void {
+  const parent = allNodes.value.find((node) => node.key === draftKey(draft.client_id));
+  if (parent) addAutomaticChildren(parent);
 }
 async function searchProject(): Promise<void> {
   const code = projectCode.value.trim();
@@ -148,7 +166,11 @@ async function enterWorkspace(): Promise<void> {
   }
   await addDraft(productType.value === "machine" ? "machine" : "component", null);
 }
-function selectNode(node: WorkNode): void { selectedKey.value = node.key; editingSaved.value = false; }
+function selectNode(node: WorkNode): void {
+  selectedKey.value = node.key;
+  editingSaved.value = false;
+  addAutomaticChildren(node);
+}
 function removeDraft(root: ComponentDraftNode): void {
   const ids = new Set([root.client_id]); let changed = true;
   while (changed) { changed = false; for (const draft of drafts.value) {
@@ -185,7 +207,10 @@ async function saveSavedEdit(node: ComponentNode): Promise<void> {
   try {
     const updated = await updateComponentNode(project.value.id, node.id, editName.value.trim(), editCode.value.trim());
     project.value.nodes[project.value.nodes.findIndex((item) => item.id === node.id)] = updated;
-    editingSaved.value = false; showToast("修改已保存");
+    editingSaved.value = false;
+    const updatedWorkNode = allNodes.value.find((item) => item.key === savedKey(updated.id));
+    if (updatedWorkNode) addAutomaticChildren(updatedWorkNode);
+    showToast("修改已保存");
   } catch (error) { errorMessage(error); } finally { saving.value = false; }
 }
 async function removeSaved(node: ComponentNode): Promise<void> {

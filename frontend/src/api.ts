@@ -154,7 +154,7 @@ export async function initializeProject(
   productNames: string,
   boardNames: string,
   softwareNames: string,
-  file: File
+  file?: File
 ): Promise<ProjectInitResult> {
   const form = new FormData();
   form.append("project_name", projectName);
@@ -163,7 +163,7 @@ export async function initializeProject(
   form.append("product_names", productNames);
   form.append("board_names", boardNames);
   form.append("software_names", softwareNames);
-  form.append("file", file);
+  if (file) form.append("file", file);
   return request<ProjectInitResult>("/api/admin/projects/init", {
     method: "POST",
     body: form

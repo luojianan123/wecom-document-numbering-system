@@ -314,18 +314,6 @@ async function initialize(): Promise<void> {
     showToast("项目号必须为4位数字");
     return;
   }
-  if (!selectedFile.value) {
-    showToast("请选择 XLSX 或 CSV 清单");
-    return;
-  }
-  if (
-    !projectProductNames.value.trim() &&
-    !projectBoardNames.value.trim() &&
-    !projectSoftwareNames.value.trim()
-  ) {
-    showToast("请至少填写一个产品、板卡或软件名称");
-    return;
-  }
   loading.value = true;
   try {
     const initialized = await initializeProject(
@@ -335,12 +323,14 @@ async function initialize(): Promise<void> {
       projectProductNames.value,
       projectBoardNames.value,
       projectSoftwareNames.value,
-      selectedFile.value
+      selectedFile.value ?? undefined
     );
     showResult(initialized);
     projectSpecialNumbering.value = false;
+    selectedFile.value = null;
+    if (fileInput.value) fileInput.value.value = "";
     await loadProjects();
-    showToast("批量生成完成");
+    showToast(selectedFile.value ? "批量生成完成" : "项目库已建立，用户现在可以申请该项目编号");
   } catch (error) {
     showError(error);
   } finally {
@@ -768,8 +758,8 @@ async function confirm(): Promise<void> {
       <section class="hero-strip admin-hero">
         <div>
           <span class="step-label">01</span>
-          <h2>上传一份清单，批量建立项目编码</h2>
-          <p>清单只需“文件名称”列，文件名称前不要填写项目号。</p>
+          <h2>先建立项目库，需要时再批量导入文件</h2>
+          <p>没有文件清单也可以启用项目；后续可随时上传表格批量生成编号。</p>
         </div>
         <div class="hero-rule">XLSX / CSV</div>
       </section>
@@ -918,8 +908,8 @@ async function confirm(): Promise<void> {
         <section class="panel init-form">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">项目信息</p>
-              <h2>新项目初始化</h2>
+            <p class="eyebrow">项目信息</p>
+              <h2>建立项目编号库</h2>
             </div>
           </div>
           <van-cell-group inset>
@@ -993,18 +983,18 @@ async function confirm(): Promise<void> {
               @change="onFileChange"
             />
             <div class="upload-icon">↑</div>
-            <strong>{{ selectedFile?.name ?? "选择文件名称清单" }}</strong>
-            <span>支持 XLSX 或 CSV，第一行必须包含“文件名称”</span>
+              <strong>{{ selectedFile?.name ?? "可选：上传文件名称清单" }}</strong>
+              <span>暂时没有文件时可以留空，先建立项目库；之后可在项目详情中上传 XLSX 或 CSV 批量新增</span>
           </div>
           <van-button
             block
             color="#17324d"
             size="large"
             :loading="loading"
-            loading-text="正在批量生成…"
+            :loading-text="selectedFile ? '正在批量生成…' : '正在建立项目库…'"
             @click="initialize"
           >
-            批量生成编码
+            {{ selectedFile ? "上传清单并批量生成编码" : "仅建立项目库" }}
           </van-button>
         </section>
 
