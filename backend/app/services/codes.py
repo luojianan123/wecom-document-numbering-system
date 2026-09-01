@@ -15,12 +15,18 @@ class CodeConflictError(ValueError):
     pass
 
 
+SUBJECT_FUNCTION_CODES = {
+    "安全控制器": "QA",
+    "发动机控制器": "KZ",
+}
+
+
 class _BatchState:
     """Indexes used only during one batch to avoid repeated full-table scans."""
 
-    def __init__(self, service: "CodeService", project_id: int) -> None:
+    def __init__(self, service: "CodeService", project: Project) -> None:
         existing_items = list(
-            service.db.scalars(select(FileCode).where(FileCode.project_id == project_id))
+            service.db.scalars(select(FileCode).where(FileCode.project_id == project.id))
         )
         self.existing_codes_by_name = {
             item.standard_name: item.final_code for item in existing_items
@@ -35,10 +41,7 @@ class _BatchState:
         self.function_codes_by_subject: dict[str, set[tuple[str, str]]] = defaultdict(set)
         for item in existing_items:
             if item.segment_d:
-                subject_key = function_subject_key(
-                    item.standard_name,
-                    service.numbering.abbreviations,
-                )
+                subject_key = service.function_subject_key(project, item.standard_name)
                 if subject_key:
                     self.function_codes_by_subject[subject_key].add(
                         (normalized_standard_name(item.standard_name), item.segment_d)
@@ -46,7 +49,7 @@ class _BatchState:
 
         for item in service.db.scalars(
             select(ProjectBatchItem).where(
-                ProjectBatchItem.project_id == project_id,
+                ProjectBatchItem.project_id == project.id,
                 ProjectBatchItem.success.is_(True),
                 ProjectBatchItem.file_code_id.is_(None),
             )
@@ -57,10 +60,7 @@ class _BatchState:
             self.staged_names.add(standard_name)
             segment_d = str(item.preview_data.get("segment_d", ""))
             if segment_d:
-                subject_key = function_subject_key(
-                    standard_name,
-                    service.numbering.abbreviations,
-                )
+                subject_key = service.function_subject_key(project, standard_name)
                 if subject_key:
                     self.function_codes_by_subject[subject_key].add(
                         (normalized_standard_name(standard_name), segment_d)
@@ -79,6 +79,38 @@ class CodeService:
         self.name_correction = name_correction
         self._batch_state: _BatchState | None = None
 
+    def function_subject_key(self, project: Project, standard_name: str) -> str:
+        normalized_name = normalized_standard_name(standard_name)
+        registered_subjects = [
+            *(('software', name) for name in project.software_names),
+            *(('board', name) for name in project.board_names),
+            *(('product', name) for name in project.product_names),
+        ]
+        matches = [
+            (subject_type, normalized_standard_name(subject_name), subject_name.strip())
+            for subject_type, subject_name in registered_subjects
+            if subject_name.strip()
+            and normalized_standard_name(subject_name) in normalized_name
+        ]
+        if matches:
+            subject_type, normalized_subject, _ = max(matches, key=lambda item: len(item[1]))
+            return f"{subject_type}:{normalized_subject}"
+        return function_subject_key(standard_name, self.numbering.abbreviations)
+
+    @staticmethod
+    def configured_subject_function_code(project: Project, standard_name: str) -> str | None:
+        normalized_name = normalized_standard_name(standard_name)
+        matches = [
+            (subject_name.strip(), code)
+            for subject_name, code in SUBJECT_FUNCTION_CODES.items()
+            if normalized_standard_name(subject_name) in normalized_name
+            and any(
+                normalized_standard_name(subject_name) == normalized_standard_name(registered)
+                for registered in project.product_names
+            )
+        ]
+        return max(matches, key=lambda item: len(item[0]))[1] if matches else None
+
     def required_function_code(
         self,
         project_id: int,
@@ -86,7 +118,10 @@ class CodeService:
         *,
         exclude_batch_item_id: int | None = None,
     ) -> str | None:
-        subject_key = function_subject_key(standard_name, self.numbering.abbreviations)
+        project = self.db.get(Project, project_id)
+        if not project:
+            return None
+        subject_key = self.function_subject_key(project, standard_name)
         if not subject_key:
             return None
         normalized_name = normalized_standard_name(standard_name)
@@ -102,7 +137,10 @@ class CodeService:
             if len(function_codes) > 1:
                 codes = "、".join(sorted(function_codes))
                 raise CodeConflictError(f"同一软件、板卡或产品存在多个历史功能码：{codes}")
-            return next(iter(function_codes), None)
+            return next(
+                iter(function_codes),
+                self.configured_subject_function_code(project, standard_name),
+            )
 
         function_codes = {
             item.segment_d
@@ -111,8 +149,7 @@ class CodeService:
             )
             if item.segment_d
             and normalized_standard_name(item.standard_name) != normalized_name
-            and function_subject_key(item.standard_name, self.numbering.abbreviations)
-            == subject_key
+            and self.function_subject_key(project, item.standard_name) == subject_key
         }
         staged_items = self.db.scalars(
             select(ProjectBatchItem).where(
@@ -129,14 +166,17 @@ class CodeService:
             if (
                 preview_function_code
                 and normalized_standard_name(preview_name) != normalized_name
-                and function_subject_key(preview_name, self.numbering.abbreviations) == subject_key
+                and self.function_subject_key(project, preview_name) == subject_key
             ):
                 function_codes.add(preview_function_code)
 
         if len(function_codes) > 1:
             codes = "、".join(sorted(function_codes))
             raise CodeConflictError(f"同一软件、板卡或产品存在多个历史功能码：{codes}")
-        return next(iter(function_codes), None)
+        return next(
+            iter(function_codes),
+            self.configured_subject_function_code(project, standard_name),
+        )
 
     async def generate_one(
         self,
@@ -301,7 +341,7 @@ class CodeService:
         original_names: list[str],
     ) -> list[BatchItemOut]:
         results: list[BatchItemOut] = []
-        self._batch_state = _BatchState(self, project.id)
+        self._batch_state = _BatchState(self, project)
         try:
             for original_name in original_names:
                 try:
@@ -310,10 +350,7 @@ class CodeService:
                         self.db.flush()
                     self._batch_state.staged_names.add(generated.standard_name)
                     self._batch_state.unavailable_codes.add(generated.final_code)
-                    subject_key = function_subject_key(
-                        generated.standard_name,
-                        self.numbering.abbreviations,
-                    )
+                    subject_key = self.function_subject_key(project, generated.standard_name)
                     if subject_key and generated.segment_d:
                         self._batch_state.function_codes_by_subject[subject_key].add(
                             (

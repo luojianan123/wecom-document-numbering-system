@@ -1719,3 +1719,38 @@ def test_admin_can_create_active_empty_project_and_user_can_request_code(
     )
     assert generated.status_code == 200, generated.text
     assert generated.json()["file_code"]["project_id"] == empty_project["id"]
+
+
+def test_registered_products_keep_distinct_consistent_function_codes(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin", "product-function-code-admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={
+            "project_name": "控制器功能码项目",
+            "project_code": "9092",
+            "product_names": "安全控制器\n发动机控制器",
+        },
+        files={
+            "file": (
+                "controllers.csv",
+                (
+                    "文件名称\n"
+                    "安全控制器方案设计报告\n"
+                    "安全控制器工艺规程\n"
+                    "发动机控制器方案设计报告\n"
+                    "发动机控制器工艺规程\n"
+                ).encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert initialized.status_code == 200, initialized.text
+    items = initialized.json()["items"]
+    codes = {item["standard_name"]: item["final_code"] for item in items}
+    assert "-3QA-" in codes["安全控制器方案设计报告"]
+    assert "-3QA-" in codes["安全控制器工艺规程"]
+    assert "-3KZ-" in codes["发动机控制器方案设计报告"]
+    assert "-3KZ-" in codes["发动机控制器工艺规程"]
