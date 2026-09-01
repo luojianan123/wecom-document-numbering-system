@@ -89,6 +89,7 @@ class NumberingService:
         expected_project_code: str | None = None,
         unavailable_final_codes: Collection[str] = (),
         required_function_code: str | None = None,
+        fallback_document_type: str | None = None,
     ) -> GeneratedNumber:
         standard_name = standardize_document_terms(
             unicodedata.normalize("NFKC", correction.standard_name).strip()
@@ -120,7 +121,10 @@ class NumberingService:
         abbreviations = (
             (matched_abbreviation,)
             if matched_abbreviation is not None
-            else self._fallback_abbreviation_candidates(standard_name)
+            else self._fallback_abbreviation_candidates(
+                fallback_document_type or standard_name,
+                prefer_direct=bool(fallback_document_type),
+            )
         )
         if not abbreviations:
             raise NumberingError("无法从文件名称生成两位备用文件简号")
@@ -215,6 +219,8 @@ class NumberingService:
     @staticmethod
     def _fallback_abbreviation_candidates(
         file_name: str,
+        *,
+        prefer_direct: bool = False,
     ) -> tuple[AbbreviationMatch, ...]:
         chinese_chars = re.findall(r"[\u4e00-\u9fff]", file_name)
         pairs = list(itertools.combinations(range(len(chinese_chars)), 2))
@@ -226,6 +232,18 @@ class NumberingService:
 
         candidates: list[AbbreviationMatch] = []
         seen_codes: set[str] = set()
+        if prefer_direct:
+            direct_code = "".join(
+                lazy_pinyin(
+                    file_name,
+                    style=Style.FIRST_LETTER,
+                    errors="ignore",
+                )
+            ).upper()
+            direct_code = re.sub(r"[^A-Z]", "", direct_code)[:2]
+            if len(direct_code) == 2:
+                seen_codes.add(direct_code)
+                candidates.append(AbbreviationMatch(alias=file_name, code=direct_code))
         for first, second in pairs:
             alias = chinese_chars[first] + chinese_chars[second]
             code = "".join(

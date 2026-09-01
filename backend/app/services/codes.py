@@ -1,13 +1,18 @@
+import re
 from collections import defaultdict
 from dataclasses import asdict
 
+from pypinyin import Style, lazy_pinyin
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import CodeReservation, FileCode, Project, ProjectBatchItem, User
 from ..schemas import BatchItemOut
-from .ai_names import NameCorrectionService
-from .name_validation import function_subject_key, normalized_standard_name
+from .ai_names import NameCorrectionService, normalize_file_name
+from .name_validation import (
+    function_subject_key,
+    normalized_standard_name,
+)
 from .numbering import GeneratedNumber, NumberingService
 
 
@@ -79,7 +84,11 @@ class CodeService:
         self.name_correction = name_correction
         self._batch_state: _BatchState | None = None
 
-    def function_subject_key(self, project: Project, standard_name: str) -> str:
+    def registered_subject(
+        self,
+        project: Project,
+        standard_name: str,
+    ) -> tuple[str, str] | None:
         normalized_name = normalized_standard_name(standard_name)
         registered_subjects = [
             *(('software', name) for name in project.software_names),
@@ -93,23 +102,54 @@ class CodeService:
             and normalized_standard_name(subject_name) in normalized_name
         ]
         if matches:
-            subject_type, normalized_subject, _ = max(matches, key=lambda item: len(item[1]))
-            return f"{subject_type}:{normalized_subject}"
+            subject_type, _, subject_name = max(matches, key=lambda item: len(item[1]))
+            return subject_type, subject_name
+        return None
+
+    def function_subject_key(self, project: Project, standard_name: str) -> str:
+        registered = self.registered_subject(project, standard_name)
+        if registered:
+            subject_type, subject_name = registered
+            return f"{subject_type}:{normalized_standard_name(subject_name)}"
         return function_subject_key(standard_name, self.numbering.abbreviations)
 
-    @staticmethod
-    def configured_subject_function_code(project: Project, standard_name: str) -> str | None:
-        normalized_name = normalized_standard_name(standard_name)
-        matches = [
-            (subject_name.strip(), code)
-            for subject_name, code in SUBJECT_FUNCTION_CODES.items()
-            if normalized_standard_name(subject_name) in normalized_name
-            and any(
-                normalized_standard_name(subject_name) == normalized_standard_name(registered)
-                for registered in project.product_names
+    def configured_subject_function_code(
+        self,
+        project: Project,
+        standard_name: str,
+    ) -> str | None:
+        registered = self.registered_subject(project, standard_name)
+        if not registered:
+            return None
+        _, subject_name = registered
+        explicit = SUBJECT_FUNCTION_CODES.get(subject_name)
+        if explicit:
+            return explicit
+        initials = "".join(
+            lazy_pinyin(
+                subject_name,
+                style=Style.FIRST_LETTER,
+                errors="ignore",
             )
-        ]
-        return max(matches, key=lambda item: len(item[0]))[1] if matches else None
+        ).upper()
+        initials = re.sub(r"[^A-Z]", "", initials)
+        return initials[:2] if len(initials) >= 2 else None
+
+    def fallback_document_type(self, project: Project, standard_name: str) -> str | None:
+        registered = self.registered_subject(project, standard_name)
+        if not registered:
+            return None
+        _, subject_name = registered
+        normalized_name = normalize_file_name(standard_name)
+        subject_index = normalized_name.find(subject_name)
+        if subject_index < 0:
+            return None
+        remainder = normalized_name[
+            subject_index + len(subject_name) :
+        ].strip("-_ ")
+        for stage in ("正样件", "鉴定件"):
+            remainder = remainder.replace(stage, "")
+        return remainder.strip("-_ ") or None
 
     def required_function_code(
         self,
@@ -256,6 +296,10 @@ class CodeService:
             project.project_code,
             unavailable_final_codes=unavailable_final_codes,
             required_function_code=required_function_code,
+            fallback_document_type=self.fallback_document_type(
+                project,
+                correction.standard_name,
+            ),
         )
         if check_existing:
             if self._batch_state is not None:

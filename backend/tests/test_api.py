@@ -1751,6 +1751,85 @@ def test_registered_products_keep_distinct_consistent_function_codes(
     items = initialized.json()["items"]
     codes = {item["standard_name"]: item["final_code"] for item in items}
     assert "-3QA-" in codes["安全控制器方案设计报告"]
-    assert "-3QA-" in codes["安全控制器工艺规程"]
+    assert codes["安全控制器工艺规程"] == "GH9092-3QA-010GY-1.00"
     assert "-3KZ-" in codes["发动机控制器方案设计报告"]
-    assert "-3KZ-" in codes["发动机控制器工艺规程"]
+    assert codes["发动机控制器工艺规程"] == "GH9092-3KZ-010GY-1.00"
+
+
+def test_registered_board_and_software_names_keep_function_codes(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin", "board-software-function-admin")
+    initialized = client.post(
+        "/api/admin/projects/init",
+        data={
+            "project_name": "板卡软件功能码项目",
+            "project_code": "9093",
+            "board_names": "安全监控板",
+            "software_names": "安全监控软件",
+        },
+        files={
+            "file": (
+                "subjects.csv",
+                (
+                    "文件名称\n"
+                    "安全监控板方案设计报告\n"
+                    "安全监控板工艺规程\n"
+                    "安全监控软件方案设计报告\n"
+                    "安全监控软件工艺规程\n"
+                ).encode(),
+                "text/csv",
+            )
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert initialized.status_code == 200, initialized.text
+    items = initialized.json()["items"]
+    codes = {item["standard_name"]: item["final_code"] for item in items}
+    board_codes = {
+        item["final_code"].split("-")[1][1:]
+        for item in items
+        if item["standard_name"].startswith("安全监控板")
+    }
+    software_codes = {
+        item["final_code"].split("-")[2][1:]
+        for item in items
+        if item["standard_name"].startswith("安全监控软件")
+    }
+    assert len(board_codes) == 1
+    assert len(software_codes) == 1
+    assert codes["安全监控板工艺规程"].endswith("-010GY-1.00")
+    assert codes["安全监控软件工艺规程"].endswith("-010GY-1.00")
+
+
+def test_user_requests_keep_registered_product_function_code_for_unknown_suffix(
+    client: TestClient,
+) -> None:
+    admin_csrf = login(client, "admin", "user-product-function-admin")
+    created = client.post(
+        "/api/admin/projects/init",
+        data={
+            "project_name": "用户产品功能码项目",
+            "project_code": "9094",
+            "product_names": "安全控制器",
+        },
+        headers={"X-CSRF-Token": admin_csrf},
+    ).json()
+    project_id = created["project"]["id"]
+
+    user_csrf = login(client, "user", "user-product-function-user")
+    first = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "安全控制器方案设计报告"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert first.status_code == 200, first.text
+    assert "-3QA-010FB-" in first.json()["file_code"]["final_code"]
+
+    second = client.post(
+        "/api/codes/generate",
+        json={"project_id": project_id, "file_name": "安全控制器工艺规程"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["file_code"]["final_code"] == "GH9094-3QA-010GY-1.00"

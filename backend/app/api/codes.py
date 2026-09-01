@@ -384,6 +384,10 @@ async def generate_missing_code(
             project.project_code,
             unavailable_final_codes=unavailable_final_codes,
             required_function_code=required_function_code,
+            fallback_document_type=service.fallback_document_type(
+                project,
+                candidate_name,
+            ),
         )
         project = db.scalar(
             select(Project)
