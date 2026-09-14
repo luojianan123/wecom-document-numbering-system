@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import unicodedata
@@ -80,6 +81,40 @@ class NameCorrectionService:
             }
         )
 
+    async def correct_many(
+        self,
+        file_names: list[str],
+        project_code: str,
+        *,
+        concurrency: int = 8,
+    ) -> list[NameCorrection | BaseException]:
+        """修正一批名称；各名称的模型调用彼此独立，并行执行以缩短批量耗时。
+
+        返回列表顺序与 ``file_names`` 一致，失败项以异常对象占位，
+        由调用方决定如何处理；并发通过信号量限制在上限内。
+        """
+        if not file_names:
+            return []
+        if len(file_names) == 1:
+            return [await self._correct_or_return_error(file_names[0], project_code)]
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _one(file_name: str) -> NameCorrection | BaseException:
+            async with semaphore:
+                return await self._correct_or_return_error(file_name, project_code)
+
+        return await asyncio.gather(*(_one(name) for name in file_names))
+
+    async def _correct_or_return_error(
+        self,
+        file_name: str,
+        project_code: str,
+    ) -> NameCorrection | BaseException:
+        try:
+            return await self.correct(file_name, project_code)
+        except Exception as exc:  # noqa: BLE001 - 结果以异常对象透传，交由调用方归类
+            return exc
+
     @staticmethod
     def _rules_correction(file_name: str) -> NameCorrection:
         level = determine_component_level(file_name)
@@ -121,19 +156,33 @@ class NameCorrectionService:
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            content = re.sub(r"^```(?:json)?|```$", "", content.strip(), flags=re.IGNORECASE)
-            return NameCorrection.model_validate(json.loads(content))
-        except (
-            httpx.HTTPError,
-            KeyError,
-            IndexError,
-            json.JSONDecodeError,
-            ValidationError,
-        ) as exc:
-            raise NameCorrectionError(f"AI 文件名修正失败：{exc}") from exc
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=45) as client:
+                    response = await client.post(url, headers=headers, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                content = re.sub(r"^```(?:json)?|```$", "", content.strip(), flags=re.IGNORECASE)
+                return NameCorrection.model_validate(json.loads(content))
+            except httpx.TransportError as exc:
+                # 连接中断/超时等瞬时错误：重试，避免个别名称直接判失败。
+                last_error = exc
+                if attempt < 2:
+                    await asyncio.sleep(0.6 * (attempt + 1))
+                    continue
+            except (
+                httpx.HTTPError,
+                KeyError,
+                IndexError,
+                json.JSONDecodeError,
+                ValidationError,
+            ) as exc:
+                last_error = exc
+                break
+        assert last_error is not None
+        detail = str(last_error) or "无详细信息"
+        raise NameCorrectionError(
+            f"AI 文件名修正失败（{type(last_error).__name__}）：{detail}"
+        ) from last_error

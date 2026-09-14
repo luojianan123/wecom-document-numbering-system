@@ -64,7 +64,7 @@ FUNCTION_KEYWORDS: tuple[tuple[str, str], ...] = (
 
 MANUAL_CODE_PATTERN = re.compile(
     r"^(?P<P>P-)?(?P<R>R-)?GH(?P<B>\d{4})-"
-    r"(?P<C>[2357])(?P<D>[A-Z]{2})-"
+    r"(?P<C>[2357])(?P<D>[A-Z]{2}[0-9]?)-"
     r"010(?P<F>[A-Z0-9]{1,12})"
     r"(?:-(?P<G>[ZC]))?-(?P<H>1\.00|2\.00)$"
 )
@@ -116,15 +116,17 @@ class NumberingService:
         except AbbreviationError:
             pass
 
-        # 文件简号是文件类型的固定属性。只要 Excel 能匹配，
-        # 即使编号冲突也不能改 F 段，只能轮换前面的功能码 D 段。
+        # 文件简号优先用 Excel 匹配结果；同产品下不同文件类型若共用一个
+        # 通用简号（如“明细表”→MX）而撞码时，回退到按文件名生成的两位简号，
+        # 使“关键过程明细表”与“关键件明细表”这类文档得以区分。
+        fallback_abbreviations = self._fallback_abbreviation_candidates(
+            fallback_document_type or standard_name,
+            prefer_direct=bool(fallback_document_type),
+        )
         abbreviations = (
-            (matched_abbreviation,)
+            (matched_abbreviation, *fallback_abbreviations)
             if matched_abbreviation is not None
-            else self._fallback_abbreviation_candidates(
-                fallback_document_type or standard_name,
-                prefer_direct=bool(fallback_document_type),
-            )
+            else fallback_abbreviations
         )
         if not abbreviations:
             raise NumberingError("无法从文件名称生成两位备用文件简号")

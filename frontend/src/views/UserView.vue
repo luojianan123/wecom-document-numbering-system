@@ -143,9 +143,17 @@ function normalizeFileNameForComparison(value: string): string {
 }
 
 function onProjectQueryChange(value: string): void {
-  if (value.trim() && selectedProjectId.value !== null) {
+  const query = value.trim();
+  if (query && selectedProjectId.value !== null) {
     selectedProjectId.value = null;
     resetResults();
+  }
+  if (/^\d{4}$/.test(query)) {
+    const exact = projects.value.find((project) => project.project_code === query);
+    if (exact) {
+      selectProject(exact);
+      return;
+    }
   }
   projectOptionsVisible.value = true;
 }

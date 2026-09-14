@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import asdict
 
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..models import CodeReservation, FileCode, Project, ProjectBatchItem, User
 from ..schemas import BatchItemOut
-from .ai_names import NameCorrectionService, normalize_file_name
+from .ai_names import NameCorrection, NameCorrectionService, normalize_file_name
 from .name_validation import (
     function_subject_key,
     normalized_standard_name,
@@ -24,6 +25,38 @@ SUBJECT_FUNCTION_CODES = {
     "安全控制器": "QA",
     "发动机控制器": "KZ",
 }
+
+# 同名前缀产品（如 时序板Ⅰ/Ⅱ、配电器A/B）靠系列标记区分，功能码取不同两位以互不冲突。
+# 先去掉“软件/模块…”这类类别后缀，再取末尾的系列标记(Ⅰ/Ⅱ、A/B、1/2…)决定起始两位。
+_KIND_SUFFIXES = ("软件", "模块", "设备", "平台", "系统", "程序", "组件", "部件")
+_MARKER_INDEX: dict[str, int] = {
+    "Ⅰ": 1, "Ⅱ": 2, "Ⅲ": 3, "Ⅳ": 4,
+    "ⅰ": 1, "ⅱ": 2, "ⅲ": 3, "ⅳ": 4,
+    "I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "X": 10,
+    "A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8,
+    "J": 9, "K": 10, "L": 11, "M": 12, "N": 13, "O": 14, "P": 15,
+    "Q": 16, "R": 17, "S": 18, "T": 19, "U": 20, "W": 21, "Y": 22, "Z": 23,
+}
+_MARKER_PATTERN = re.compile(r"(?:Ⅳ|Ⅲ|Ⅱ|Ⅰ|IV|III|II|I|V|X|[A-Z]|[1-9])$")
+
+
+def _split_subject_marker(subject_name: str) -> tuple[str, int]:
+    """去掉类别后缀与末尾系列标记，返回(基名, 系列序号)。
+
+    系列序号=0 表示无标记；Ⅰ/A/1 → 1，Ⅱ/B/2 → 2，Ⅲ/C/3 → 3……
+    示例：“时序板II软件” -> (“时序板”, 2)；“配电器A软件” -> (“配电器”, 1)。
+    基名取两位拼音首字母后拼上系列序号，使同前缀不同系列得到不同功能码：
+    时序板Ⅰ→SX1、Ⅱ→SX2、Ⅲ→SX3；配电器A→PD1、B→PD2。
+    """
+    name = unicodedata.normalize("NFKC", subject_name).strip()
+    for suffix in _KIND_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)].strip()
+            break
+    match = _MARKER_PATTERN.search(name)
+    if not match:
+        return name, 0
+    return name[: match.start()].strip(), _MARKER_INDEX.get(match.group(0), 0)
 
 
 class _BatchState:
@@ -125,15 +158,21 @@ class CodeService:
         explicit = SUBJECT_FUNCTION_CODES.get(subject_name)
         if explicit:
             return explicit
+        base, series_index = _split_subject_marker(subject_name)
         initials = "".join(
             lazy_pinyin(
-                subject_name,
+                base,
                 style=Style.FIRST_LETTER,
                 errors="ignore",
             )
         ).upper()
         initials = re.sub(r"[^A-Z]", "", initials)
-        return initials[:2] if len(initials) >= 2 else None
+        if len(initials) < 2:
+            return None
+        code = initials[:2]
+        if series_index:
+            code = f"{code}{series_index}"
+        return code
 
     def fallback_document_type(self, project: Project, standard_name: str) -> str | None:
         registered = self.registered_subject(project, standard_name)
@@ -275,11 +314,13 @@ class CodeService:
         project: Project,
         exclude_batch_item_id: int | None = None,
         check_existing: bool = True,
+        correction: NameCorrection | None = None,
     ) -> GeneratedNumber:
-        correction = await self.name_correction.correct(
-            original_name,
-            project.project_code,
-        )
+        if correction is None:
+            correction = await self.name_correction.correct(
+                original_name,
+                project.project_code,
+            )
         required_function_code = self.required_function_code(
             project.id,
             correction.standard_name,
@@ -356,8 +397,13 @@ class CodeService:
         self,
         project: Project,
         original_name: str,
+        correction: NameCorrection | None = None,
     ) -> tuple[ProjectBatchItem, GeneratedNumber]:
-        generated = await self.preview_number(original_name, project)
+        generated = await self.preview_number(
+            original_name,
+            project,
+            correction=correction,
+        )
         batch_item = self.stage_generated(project, original_name, generated)
         return batch_item, generated
 
@@ -387,10 +433,36 @@ class CodeService:
         results: list[BatchItemOut] = []
         self._batch_state = _BatchState(self, project)
         try:
-            for original_name in original_names:
+            corrections = await self.name_correction.correct_many(
+                original_names,
+                project.project_code,
+            )
+            for original_name, correction in zip(original_names, corrections, strict=True):
+                if isinstance(correction, BaseException):
+                    batch_item = ProjectBatchItem(
+                        project_id=project.id,
+                        original_name=original_name,
+                        success=False,
+                        error=str(correction),
+                    )
+                    self.db.add(batch_item)
+                    self.db.flush()
+                    results.append(
+                        BatchItemOut(
+                            id=batch_item.id,
+                            original_name=original_name,
+                            success=False,
+                            error=batch_item.error,
+                        )
+                    )
+                    continue
                 try:
                     with self.db.begin_nested():
-                        batch_item, generated = await self.stage_one(project, original_name)
+                        batch_item, generated = await self.stage_one(
+                            project,
+                            original_name,
+                            correction=correction,
+                        )
                         self.db.flush()
                     self._batch_state.staged_names.add(generated.standard_name)
                     self._batch_state.unavailable_codes.add(generated.final_code)

@@ -96,6 +96,20 @@ const childKinds = computed<ComponentKind[]>(() => {
 });
 const completedDrafts = computed(() => drafts.value.filter((draft) => draft.name.trim()).length);
 const emptyDrafts = computed(() => drafts.value.length - completedDrafts.value);
+const duplicateSiblingNames = computed<string[]>(() => {
+  const seen = new Map<string, Set<string>>();
+  const duplicates = new Set<string>();
+  for (const node of allNodes.value) {
+    const name = node.name.trim();
+    if (!name) continue;
+    const bucket = `${node.parentKey ?? "root"}|${node.kind}`;
+    const names = seen.get(bucket) ?? new Set<string>();
+    if (names.has(name)) duplicates.add(name);
+    else names.add(name);
+    seen.set(bucket, names);
+  }
+  return [...duplicates];
+});
 
 function makeDraft(kind: ComponentKind, parent: WorkNode | null): ComponentDraftNode {
   draftCounter += 1;
@@ -134,7 +148,7 @@ function addAutomaticChildren(parent: WorkNode): void {
   );
   const newDrafts = suggestions
     .filter((name) => !existingNames.has(name))
-    .map((name) => ({ ...makeDraft(childKind, parent), name }));
+    .map((name) => ({ ...makeDraft(childKind, parent), name, stage: parent.stage }));
   if (!newDrafts.length) return;
   drafts.value.push(...newDrafts);
   showToast(`已自动添加${newDrafts.length}个${childLabel}，可继续修改或删除`);
@@ -184,6 +198,16 @@ function removeDraft(root: ComponentDraftNode): void {
 async function generateAll(): Promise<void> {
   if (!drafts.value.length && !needsRenumber.value) { showToast("当前没有待生成的内容"); return; }
   if (emptyDrafts.value) { showToast("请先填写所有草稿名称"); return; }
+  if (duplicateSiblingNames.value.length) {
+    try {
+      await showConfirmDialog({
+        title: "检测到重复名称",
+        message: `同级存在重复名称：${duplicateSiblingNames.value.join("、")}。确定仍要生成吗？`,
+        confirmButtonText: "仍然生成",
+        cancelButtonText: "返回修改"
+      });
+    } catch { return; }
+  }
   saving.value = true;
   try {
     if (drafts.value.length) {
